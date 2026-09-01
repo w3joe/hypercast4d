@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this sanity check, cite the original 4D hypercomplex paper."
+title: "HyperCast4D"
+type: software
+version: 0.1.0
+date-released: 2026-09-01
+preferred-citation:
+  type: article
+  title: "4D hypercomplex-valued neural network in multivariate time series forecasting"
+  authors:
+    - family-names: Kycia
+      given-names: Radoslaw A.
+    - family-names: Niemczynowicz
+      given-names: Agnieszka
+  year: 2025
+  doi: 10.1038/s41598-025-08957-5

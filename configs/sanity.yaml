@@ -1,0 +1,26 @@
+data:
+  path: data/raw/paper_data.xlsx
+  target_column: null
+  train_fraction: 0.70
+  validation_fraction: 0.15
+
+experiment:
+  output_dir: results/sanity
+  cells:
+    - {window: 10, horizon: 1}
+    - {window: 20, horizon: 5}
+    - {window: 60, horizon: 20}
+  seeds: [7, 19, 31, 43, 59]
+
+training:
+  batch_size: 64
+  epochs: 20
+  learning_rate: 0.001
+  patience: 5
+  device: cpu
+
+models:
+  hyper_hidden: 8
+  cnn_channels: 16
+  lstm_hidden: 16
+  dropout: 0.10
