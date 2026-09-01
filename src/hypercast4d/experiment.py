@@ -1,4 +1,4 @@
-"""Run the bounded, leakage-safe HyperCast4D sanity-check matrix."""
+"""Run the bounded, leakage-safe HyperCast4D evaluation matrix."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def _plot(summary: pd.DataFrame, destination: Path) -> None:
         )
     axis.set_xticks(x, cells)
     axis.set_ylabel("Test MAE (original target units; lower is better)")
-    axis.set_title("Leakage-safe forecasting sanity check")
+    axis.set_title("Leakage-safe forecasting evaluation")
     axis.legend(fontsize=8, ncol=2)
     axis.grid(axis="y", alpha=0.25)
     fig.tight_layout()
@@ -216,7 +216,7 @@ def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/sanity.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/evaluation.yaml"))
     parser.add_argument(
         "--quick",
         action="store_true",

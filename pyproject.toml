@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hypercast4d"
 version = "0.1.0"
-description = "Clean-room sanity check for 4D hypercomplex time-series forecasting"
+description = "Clean-room evaluation of 4D hypercomplex time-series forecasting"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}

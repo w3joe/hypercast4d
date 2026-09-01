@@ -1,6 +1,6 @@
 # HyperCast4D
 
-HyperCast4D is a standalone, clean-room sanity check for the paper
+HyperCast4D is a standalone, clean-room evaluation of the paper
 [*4D hypercomplex-valued neural network in multivariate time series
 forecasting*](https://doi.org/10.1038/s41598-025-08957-5). It answers one
 narrow question: do quaternion, coquaternion and `Cl(1,1)` front ends behave
@@ -26,7 +26,7 @@ efficiently. The paper reports broadly similar predictive performance across
 the compared architectures, with benefits depending on setup rather than one
 universally dominant algebra.
 
-## Why this sanity check is needed
+## Why this evaluation is needed
 
 Inspection of the publisher's supplementary notebook exposes several issues
 that make a direct numerical reproduction hard to interpret:
@@ -58,7 +58,7 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 hypercast4d-download
 pytest
-hypercast4d-run --config configs/sanity.yaml --quick
+hypercast4d-run --config configs/evaluation.yaml --quick
 ```
 
 The quick run evaluates one window/horizon cell, one seed and at most three
@@ -66,10 +66,10 @@ epochs. The bounded default evaluates representative short, medium and long
 horizons with five seeds:
 
 ```bash
-hypercast4d-run --config configs/sanity.yaml
+hypercast4d-run --config configs/evaluation.yaml
 ```
 
-Outputs are written to the ignored `results/sanity/` directory:
+Outputs are written to the ignored `results/evaluation/` directory:
 
 - `runs.csv`: one row per model, cell and seed;
 - `summary.csv`: means and standard deviations;
@@ -104,8 +104,8 @@ sets the minimum bar that any follow-up model must clear.
 This repository intentionally does not claim bit-for-bit reproduction of the
 published tables. The `chronological-v1` results answer a corrected question:
 performance when future rows do not influence normalization, model selection
-or training. Results should be interpreted as a falsification-oriented sanity
-check, not as proof that one algebra is universally superior.
+or training. Results should be interpreted as a falsification-oriented
+evaluation, not as proof that one algebra is universally superior.
 
 `process_peak_rss_mb` is the operating system's process-wide peak RSS sampled
 after each fit. It is useful as a coarse ceiling and may be cumulative across

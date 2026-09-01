@@ -5,7 +5,7 @@ data:
   validation_fraction: 0.15
 
 experiment:
-  output_dir: results/sanity
+  output_dir: results/evaluation
   cells:
     - {window: 10, horizon: 1}
     - {window: 20, horizon: 5}
