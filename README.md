@@ -124,6 +124,56 @@ This is equivalent to:
 hypercast4d-run --config configs/evaluation.yaml
 ```
 
+## Live results dashboard
+
+HyperCast4D includes a local browser dashboard with no extra web-framework
+dependency. To view the existing complete results, run:
+
+```bash
+hypercast4d-dashboard
+```
+
+It opens `http://127.0.0.1:8765` and displays:
+
+- experiment progress;
+- the number of completed models and forecasting cells;
+- a live grouped MAE graph;
+- the latest completed runs and their timing;
+- the best mean MAE observed so far.
+
+To watch a new full evaluation live, use two terminals.
+
+Terminal 1:
+
+```bash
+cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
+source .venv/bin/activate
+hypercast4d-dashboard
+```
+
+Terminal 2:
+
+```bash
+cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
+source .venv/bin/activate
+hypercast4d-run
+```
+
+The runner writes `runs.csv` and `status.json` atomically after every completed
+model. The dashboard polls those files every 1.5 seconds, so bars and progress
+appear while training continues.
+
+To watch a quick evaluation instead:
+
+```bash
+hypercast4d-dashboard --results results/evaluation_quick
+```
+
+Then run `hypercast4d-run --quick` in the second terminal. Use `Ctrl-C` to stop
+the dashboard server. Pass `--no-browser` if you do not want it to open a tab
+automatically, or choose another port with `--port 9000`. The server binds to
+`127.0.0.1` by default, and no experiment data is uploaded anywhere.
+
 ### Customize the experiment
 
 Copy the configuration and edit the copy:
@@ -186,6 +236,7 @@ Each run writes the following files under its configured output directory:
 |---|---|
 | `runs.csv` | One row per model, forecasting cell, and seed |
 | `summary.csv` | Mean and standard deviation grouped by model and cell |
+| `status.json` | Live runner state and completed/total model counts |
 | `metadata.json` | Python, PyTorch, device, input columns, and full configuration |
 | `mae_by_cell.png` | Test MAE comparison across forecasting cells |
 | `accuracy_vs_parameters.png` | Accuracy versus trainable-parameter count |
@@ -318,6 +369,7 @@ hypercast4d/
 │   ├── models.py                 # Seven forecasting models
 │   ├── training.py               # Training and metrics
 │   ├── experiment.py             # Evaluation CLI and result generation
+│   ├── dashboard.py              # Auto-refreshing local results dashboard
 │   └── download.py               # Supplement downloader and verification
 ├── tests/                        # Algebra, gradient, data, and model tests
 ├── data/                         # Ignored downloaded material

@@ -23,6 +23,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
+hypercast4d-dashboard = "hypercast4d.dashboard:main"
 hypercast4d-download = "hypercast4d.download:main"
 hypercast4d-run = "hypercast4d.experiment:main"
 

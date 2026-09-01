@@ -6,6 +6,7 @@ import argparse
 import json
 import platform
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,54 @@ MODEL_NAMES = (
     "hyper_coquaternion",
     "hyper_cl11",
 )
+
+RESULT_COLUMNS = (
+    "window",
+    "horizon",
+    "seed",
+    "model",
+    "mae",
+    "mse",
+    "parameters",
+    "train_seconds",
+    "process_peak_rss_mb",
+    "epochs_ran",
+    "best_validation_mse_scaled",
+    "train_samples",
+    "validation_samples",
+    "test_samples",
+)
+
+
+def _atomic_text(path: Path, contents: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(contents, encoding="utf-8")
+    temporary.replace(path)
+
+
+def _write_live_results(path: Path, rows: list[dict[str, Any]]) -> None:
+    frame = pd.DataFrame(rows, columns=RESULT_COLUMNS)
+    temporary = path.with_name(f".{path.name}.tmp")
+    frame.to_csv(temporary, index=False)
+    temporary.replace(path)
+
+
+def _write_status(
+    path: Path,
+    *,
+    state: str,
+    completed: int,
+    total: int,
+    started_at: str,
+) -> None:
+    status = {
+        "state": state,
+        "completed": completed,
+        "total": total,
+        "started_at": started_at,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    _atomic_text(path, json.dumps(status, indent=2) + "\n")
 
 
 def _device(name: str) -> torch.device:
@@ -104,6 +153,18 @@ def run(
     epochs = min(3, training_config["epochs"]) if quick else training_config["epochs"]
     device = _device(training_config.get("device", "cpu"))
     rows: list[dict[str, Any]] = []
+    results_path = output / "runs.csv"
+    status_path = output / "status.json"
+    started_at = datetime.now(UTC).isoformat()
+    total_runs = len(cells) * len(seeds) * len(MODEL_NAMES)
+    _write_live_results(results_path, rows)
+    _write_status(
+        status_path,
+        state="running",
+        completed=0,
+        total=total_runs,
+        started_at=started_at,
+    )
 
     for cell in cells:
         window, horizon = int(cell["window"]), int(cell["horizon"])
@@ -177,6 +238,14 @@ def run(
                     "test_samples": len(prepared.test.x),
                 }
                 rows.append(row)
+                _write_live_results(results_path, rows)
+                _write_status(
+                    status_path,
+                    state="running",
+                    completed=len(rows),
+                    total=total_runs,
+                    started_at=started_at,
+                )
                 print(
                     f"{name:22s} w={window:2d} h={horizon:2d} seed={seed:2d} "
                     f"MAE={metrics['mae']:.5g}"
@@ -196,7 +265,7 @@ def run(
         )
         .sort_values(["window", "horizon", "mae_mean"])
     )
-    results.to_csv(output / "runs.csv", index=False)
+    _write_live_results(results_path, rows)
     summary.to_csv(output / "summary.csv", index=False)
     metadata = {
         "protocol": "chronological-v1",
@@ -210,10 +279,18 @@ def run(
         "rows": len(frame),
         "config": config,
     }
-    (output / "metadata.json").write_text(
-        json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+    _atomic_text(
+        output / "metadata.json",
+        json.dumps(metadata, indent=2) + "\n",
     )
     _plot(summary, output)
+    _write_status(
+        status_path,
+        state="complete",
+        completed=len(rows),
+        total=total_runs,
+        started_at=started_at,
+    )
     return results, summary
 
 
