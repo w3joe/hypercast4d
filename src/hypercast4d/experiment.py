@@ -96,6 +96,8 @@ def run(
     model_config = config["models"]
     frame = load_paper_data(data_config["path"], data_config.get("target_column"))
     output = Path(experiment_config["output_dir"])
+    if quick:
+        output = output.with_name(f"{output.name}_quick")
     output.mkdir(parents=True, exist_ok=True)
     cells = experiment_config["cells"][:1] if quick else experiment_config["cells"]
     seeds = experiment_config["seeds"][:1] if quick else experiment_config["seeds"]
@@ -203,6 +205,7 @@ def run(
         "platform": platform.platform(),
         "torch": torch.__version__,
         "device": str(device),
+        "output_dir": str(output),
         "columns": list(frame.columns),
         "rows": len(frame),
         "config": config,

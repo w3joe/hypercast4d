@@ -1,91 +1,208 @@
 # HyperCast4D
 
-HyperCast4D is a standalone, clean-room evaluation of the paper
+HyperCast4D is a runnable, clean-room evaluation of the paper
 [*4D hypercomplex-valued neural network in multivariate time series
-forecasting*](https://doi.org/10.1038/s41598-025-08957-5). It answers one
-narrow question: do quaternion, coquaternion and `Cl(1,1)` front ends behave
-distinctly and remain competitive under a chronological, leakage-safe
-forecasting protocol?
+forecasting*](https://doi.org/10.1038/s41598-025-08957-5).
 
-This project has no connection to Numerion and does not reuse the paper's
-archived implementation.
+It implements quaternion, coquaternion, and Clifford `Cl(1,1)` dense layers in
+PyTorch and compares them with persistence, linear, CNN, and LSTM forecasters.
+The evaluation uses chronological splits and training-only normalization to
+avoid future-data leakage.
 
-## What the paper proposes
+This project is only about the 4D hypercomplex paper. It has no connection to
+Numerion.
 
-The paper groups four related real time series into one four-component value
-and replaces a model's first layer with a hypercomplex dense layer. It compares
-three multiplication systems—quaternions, coquaternions and the Clifford
-algebra `Cl(1,1)`—against Conv1D and LSTM alternatives on financial forecasting.
-Its reported grid uses input windows of 10, 20, 40 and 60 observations and
-forecast horizons of 1, 5, 10 and 20.
+## Run it now on this machine
 
-The attractive claim is parameter sharing: a hypercomplex map learns four real
-weight matrices where an unconstrained real map of the same expanded width
-would learn sixteen. That could encode relations between the four series more
-efficiently. The paper reports broadly similar predictive performance across
-the compared architectures, with benefits depending on setup rather than one
-universally dominant algebra.
-
-## Why this evaluation is needed
-
-Inspection of the publisher's supplementary notebook exposes several issues
-that make a direct numerical reproduction hard to interpret:
-
-- The model factory accepts an algebra argument but constructs the hypercomplex
-  layer with `quaternions` hard-coded. The archived algebra grid therefore does
-  not demonstrate that the three algebras were actually compared.
-- Min-max scaling is fit before splitting the data.
-- Random `train_test_split` and ordinary shuffled cross-validation are applied
-  to overlapping time windows, allowing temporal leakage.
-- The repeatedly used validation subset is not an untouched final test set.
-- The reported permutation study covers only two of the 24 possible mappings
-  of four real series to four basis components.
-- Failure to reject equal performance is not evidence of statistical
-  equivalence; runtime and memory are also needed for efficiency claims.
-
-HyperCast4D makes algebra selection executable and testable, fits normalization
-only on training rows, divides samples chronologically by complete target
-ranges, and reports an untouched test set. It includes persistence and linear
-baselines in addition to CNN, LSTM and all three hypercomplex variants.
-
-## Reproducible setup
-
-Python 3.10 or later is required. From this directory:
+The environment and paper dataset are already prepared in this workspace. Open
+a terminal and run:
 
 ```bash
-python3 -m venv .venv
+cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
 source .venv/bin/activate
-python -m pip install -e '.[dev]'
-hypercast4d-download
 pytest
-hypercast4d-run --config configs/evaluation.yaml --quick
+hypercast4d-run --quick
 ```
 
-The quick run evaluates one window/horizon cell, one seed and at most three
-epochs. The bounded default evaluates representative short, medium and long
-horizons with five seeds:
+The quick evaluation runs one window/horizon combination, one random seed, and
+at most three training epochs. It should finish in a few seconds. Its results
+will appear in `results/evaluation_quick/`.
+
+To run the complete bounded evaluation instead:
+
+```bash
+hypercast4d-run
+```
+
+The complete evaluation runs seven models on three forecasting configurations
+with five random seeds, producing 105 result rows. On the development machine
+it took roughly 30 seconds on CPU, although runtime will vary by computer.
+
+When you are finished, leave the environment with:
+
+```bash
+deactivate
+```
+
+## Set up a fresh copy
+
+Python 3.10 or newer is required; Python 3.12 is the tested version. Start in
+the repository's root directory—the directory containing `pyproject.toml`.
+
+### macOS or Linux
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e '.[dev]'
+```
+
+If `python3.12` is unavailable but `python3 --version` reports a supported
+version, use `python3` instead.
+
+### Windows PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+### Download the paper data
+
+After installation, download and extract the publisher's supplementary data:
+
+```bash
+hypercast4d-download
+```
+
+This command:
+
+1. Downloads the supplementary ZIP from Springer Nature.
+2. Checks it against a pinned SHA-256 checksum.
+3. Extracts the experiment and summary workbooks into `data/raw/`.
+4. Writes the observed checksums to `data/raw/checksums.json`.
+
+The downloaded files are ignored by Git and are not included in this
+repository. If the publisher changes its archive, the command stops instead of
+silently using different inputs. Inspect any changed archive before using the
+`--allow-updated-source` option.
+
+Verify the installation with:
+
+```bash
+pytest
+```
+
+All 27 tests should pass.
+
+## Run an evaluation
+
+The default configuration is [configs/evaluation.yaml](configs/evaluation.yaml).
+
+### Quick smoke run
+
+```bash
+hypercast4d-run --quick
+```
+
+Use this first to confirm that data loading, training, metrics, and plotting all
+work on your machine. Quick outputs use `results/evaluation_quick/`, so they do
+not overwrite the complete evaluation.
+
+### Complete bounded run
+
+```bash
+hypercast4d-run
+```
+
+This is equivalent to:
 
 ```bash
 hypercast4d-run --config configs/evaluation.yaml
 ```
 
-Outputs are written to the ignored `results/evaluation/` directory:
+### Customize the experiment
 
-- `runs.csv`: one row per model, cell and seed;
-- `summary.csv`: means and standard deviations;
-- `metadata.json`: environment, columns, row count and full configuration;
-- `mae_by_cell.png` and `accuracy_vs_parameters.png`.
+Copy the configuration and edit the copy:
 
-The downloader verifies the publisher archive against a pinned SHA-256, then
-stores the archive, extracted workbooks and checksums under ignored `data/raw/`.
-No third-party data is committed. If Springer Nature legitimately replaces the
-archive, inspect it before using `--allow-updated-source`.
+```bash
+cp configs/evaluation.yaml configs/my_experiment.yaml
+hypercast4d-run --config configs/my_experiment.yaml
+```
 
-## Initial bounded result
+The important settings are:
 
-The initial CPU run on the downloaded supplementary workbook used the committed
-configuration (20 maximum epochs, early stopping, five seeds). Mean test MAE in
-original Copper units was:
+```yaml
+experiment:
+  output_dir: results/evaluation
+  cells:
+    - {window: 10, horizon: 1}
+    - {window: 20, horizon: 5}
+    - {window: 60, horizon: 20}
+  seeds: [7, 19, 31, 43, 59]
+
+training:
+  batch_size: 64
+  epochs: 20
+  learning_rate: 0.001
+  patience: 5
+  device: cpu
+```
+
+- `window` is the number of historical observations supplied to a model.
+- `horizon` is the number of future Copper values predicted at once.
+- `seeds` controls repeated training runs.
+- `epochs` is the maximum number of passes through the training data.
+- `patience` enables early stopping when validation error stops improving.
+- `device` can remain `cpu`; `auto` selects CUDA, Apple MPS, or CPU when
+  available.
+
+Give custom experiments a different `output_dir` so they do not overwrite an
+earlier run.
+
+## Models included
+
+Every experiment evaluates:
+
+- `persistence`: repeats the most recently observed Copper value;
+- `linear`: an ordinary real-valued linear model;
+- `cnn`: a real-valued one-dimensional convolutional model;
+- `lstm`: a real-valued recurrent model;
+- `hyper_quaternion`: a quaternion HyperDense front end;
+- `hyper_coquaternion`: a coquaternion HyperDense front end;
+- `hyper_cl11`: a Clifford `Cl(1,1)` HyperDense front end.
+
+The three hypercomplex variants use the same surrounding architecture. Only
+the multiplication table changes, making the algebra comparison explicit.
+
+## Output files
+
+Each run writes the following files under its configured output directory:
+
+| File | Contents |
+|---|---|
+| `runs.csv` | One row per model, forecasting cell, and seed |
+| `summary.csv` | Mean and standard deviation grouped by model and cell |
+| `metadata.json` | Python, PyTorch, device, input columns, and full configuration |
+| `mae_by_cell.png` | Test MAE comparison across forecasting cells |
+| `accuracy_vs_parameters.png` | Accuracy versus trainable-parameter count |
+
+The main metric is `mae`, measured in the original Copper units. Lower is
+better. `mse` is also reported. Compare every trained model with persistence;
+a more complicated model is not useful if it cannot beat that baseline.
+
+`process_peak_rss_mb` is the operating system's process-wide peak resident
+memory sampled after each fit. It is a coarse ceiling and can accumulate across
+models. Use isolated processes or a device profiler for publication-quality
+memory measurements.
+
+## Initial result
+
+The initial CPU run used the committed configuration with five seeds. Mean test
+MAE was:
 
 | Window / horizon | Persistence | Linear | Best hypercomplex variant |
 |---|---:|---:|---:|
@@ -93,27 +210,119 @@ original Copper units was:
 | 20 / 5 | **0.0868** | 0.1367 | quaternion, 0.2027 |
 | 60 / 20 | **0.1503** | 0.2265 | coquaternion, 0.3304 |
 
-Persistence wins all three cells, and the best algebra is not stable across
-horizons. This is useful negative evidence: under this corrected, deliberately
-bounded setup, model complexity is not yet justified. It is not a definitive
-comparison—the architectures have not received equally extensive tuning—but it
-sets the minimum bar that any follow-up model must clear.
+Persistence won all three cells, and the best algebra was not stable across
+horizons. This is useful negative evidence under a bounded evaluation, not a
+claim that hypercomplex forecasting can never work. The architectures have not
+received equally extensive hyperparameter tuning.
 
-## Protocol boundary
+## What the paper proposes
 
-This repository intentionally does not claim bit-for-bit reproduction of the
-published tables. The `chronological-v1` results answer a corrected question:
-performance when future rows do not influence normalization, model selection
-or training. Results should be interpreted as a falsification-oriented
-evaluation, not as proof that one algebra is universally superior.
+The paper groups four related real time series into one four-component value
+and replaces a model's first layer with a hypercomplex dense layer. Its dataset
+contains Copper, FCX, the Chilean Peso exchange rate, and SCCO. It compares
+quaternions, coquaternions, and `Cl(1,1)` with Conv1D and LSTM alternatives over
+input windows of 10, 20, 40, and 60 and forecast horizons of 1, 5, 10, and 20.
 
-`process_peak_rss_mb` is the operating system's process-wide peak RSS sampled
-after each fit. It is useful as a coarse ceiling and may be cumulative across
-models; use isolated processes or a device-specific profiler for publication-
-quality memory comparisons.
+A hypercomplex map learns four real weight matrices where an unconstrained real
+map of matching expanded width would learn sixteen. The intended advantage is
+therefore structured parameter sharing between the four series.
 
-The most useful next research step after this check is a complete 24-permutation
-study with paired multi-seed forecasts and an equivalence test (for example,
-TOST with a predeclared practical error margin). That directly tests whether
-component assignment or algebra choice matters, rather than rediscovering the
-paper's stated low-frequency bias.
+## Does the paper have a GitHub repository?
+
+There is an author-owned, related repository:
+
+- [rkycia/KHNN](https://github.com/rkycia/KHNN) — Keras-based Hypercomplex
+  Neural Networks by Radosław Kycia and Agnieszka Niemczynowicz. It includes
+  general algebra definitions, hyperdense layers, convolutional layers,
+  examples, and experimental PyTorch files.
+
+There is also an institutional fork:
+
+- [ElsevierSoftwareX/SOFTX-D-25-00004](https://github.com/ElsevierSoftwareX/SOFTX-D-25-00004)
+  — a fork of `rkycia/KHNN`, not an independent implementation of the
+  forecasting paper.
+
+As checked in September 2026, neither repository is a dedicated, turnkey
+repository for this exact forecasting experiment. The paper-specific notebook,
+dataset, saved results, model summaries, and plots are instead distributed in
+the supplementary ZIP linked from the
+[Scientific Reports article](https://www.nature.com/articles/s41598-025-08957-5).
+The downloader in this repository retrieves that ZIP.
+
+HyperCast4D does not copy KHNN or the supplementary source code. Its PyTorch
+layer was independently implemented from the paper's multiplication tables and
+checked against the archived block-matrix convention.
+
+## Why this evaluation differs from the archived notebook
+
+Inspection of the paper's supplementary notebook found several issues:
+
+- Its model factory accepts an algebra argument but constructs the HyperDense
+  layer with `quaternions` hard-coded.
+- Min-max normalization is fitted before the dataset is split.
+- Random train/test splitting and ordinary shuffled cross-validation are
+  applied to overlapping time windows.
+- The repeatedly used validation subset is not an untouched test set.
+- Only two of the 24 possible assignments of four series to four algebra
+  components are evaluated.
+- Failure to reject equal performance is treated as evidence of equivalence,
+  without a dedicated equivalence test.
+
+HyperCast4D therefore uses a corrected `chronological-v1` protocol: scaling is
+fitted only on training rows, target windows cannot cross split boundaries, and
+the final test partition remains untouched during training and model selection.
+It does not claim bit-for-bit reproduction of the published tables.
+
+## Troubleshooting
+
+### `hypercast4d-run: command not found`
+
+Activate the environment and reinstall the project:
+
+```bash
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+```
+
+On Windows, activate with `.venv\Scripts\Activate.ps1`.
+
+### `Dataset not found`
+
+Run:
+
+```bash
+hypercast4d-download
+```
+
+The expected file is `data/raw/paper_data.xlsx`.
+
+### The complete run takes too long
+
+Start with `hypercast4d-run --quick`. For a smaller custom run, reduce the
+number of `seeds`, `cells`, or `epochs` in a copied YAML configuration.
+
+### Results were overwritten
+
+Change `experiment.output_dir` in each custom configuration. Results are
+ignored by Git, so overwriting them cannot be recovered through Git history.
+
+## Repository layout
+
+```text
+hypercast4d/
+├── configs/evaluation.yaml       # Default experiment settings
+├── src/hypercast4d/
+│   ├── algebras.py               # 4D multiplication tables
+│   ├── layers.py                 # HyperDense implementation
+│   ├── data.py                   # Leakage-safe data preparation
+│   ├── models.py                 # Seven forecasting models
+│   ├── training.py               # Training and metrics
+│   ├── experiment.py             # Evaluation CLI and result generation
+│   └── download.py               # Supplement downloader and verification
+├── tests/                        # Algebra, gradient, data, and model tests
+├── data/                         # Ignored downloaded material
+└── results/                      # Ignored generated results
+```
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for provenance and
+[LICENSE](LICENSE) for this implementation's license.
