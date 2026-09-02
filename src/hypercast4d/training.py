@@ -46,7 +46,15 @@ def fit_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    patience: int,
+    adam_beta1: float,
+    adam_beta2: float,
+    adam_epsilon: float,
+    adam_amsgrad: bool,
+    loss_name: str,
+    shuffle: bool,
+    early_stopping_patience: int | None,
+    early_stopping_min_delta: float,
+    restore_best_weights: bool,
     device: torch.device,
 ) -> FitResult:
     seed_everything(seed)
@@ -55,12 +63,23 @@ def fit_model(
     train_loader = DataLoader(
         train_data,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=shuffle,
         generator=generator,
     )
     validation_loader = DataLoader(validation_data, batch_size=batch_size)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(adam_beta1, adam_beta2),
+        eps=adam_epsilon,
+        amsgrad=adam_amsgrad,
+    )
+    if loss_name == "mse":
+        criterion: nn.Module = nn.MSELoss()
+    elif loss_name == "mae":
+        criterion = nn.L1Loss()
+    else:
+        raise ValueError("loss must be 'mse' or 'mae'")
     best_loss = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
     stale_epochs = 0
@@ -87,18 +106,22 @@ def fit_model(
                 total_items += len(features)
         validation_loss = total_loss / total_items
         epochs_ran = epoch + 1
-        if validation_loss < best_loss - 1e-10:
+        if validation_loss < best_loss - early_stopping_min_delta:
             best_loss = validation_loss
             best_state = copy.deepcopy(model.state_dict())
             stale_epochs = 0
         else:
             stale_epochs += 1
-            if stale_epochs >= patience:
+            if (
+                early_stopping_patience is not None
+                and stale_epochs >= early_stopping_patience
+            ):
                 break
 
     if best_state is None:
         raise RuntimeError("Training did not produce a checkpoint")
-    model.load_state_dict(best_state)
+    if restore_best_weights:
+        model.load_state_dict(best_state)
     return FitResult(
         epochs_ran=epochs_ran,
         best_validation_loss=best_loss,

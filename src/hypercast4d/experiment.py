@@ -152,6 +152,7 @@ def run(
     data_config = config["data"]
     experiment_config = config["experiment"]
     training_config = config["training"]
+    optimizer_config = training_config["optimizer"]
     model_config = config["models"]
     model_names = tuple(model_config["enabled"])
     unknown_models = sorted(set(model_names) - set(SUPPORTED_MODEL_NAMES))
@@ -193,6 +194,26 @@ def run(
         < 1
     ):
         raise ValueError("Epoch and batch-size settings must be positive")
+    patience_value = training_config["early_stopping_patience"]
+    patience = None if patience_value is None else int(patience_value)
+    if patience is not None and patience < 1:
+        raise ValueError("early_stopping_patience must be null or positive")
+    if float(training_config["early_stopping_min_delta"]) < 0:
+        raise ValueError("early_stopping_min_delta must not be negative")
+    if optimizer_config["name"] != "adam":
+        raise ValueError("This paper-aligned runner supports the Adam optimizer")
+    beta1 = float(optimizer_config["beta1"])
+    beta2 = float(optimizer_config["beta2"])
+    if not 0 <= beta1 < 1 or not 0 <= beta2 < 1:
+        raise ValueError("Adam beta values must be in [0, 1)")
+    if (
+        min(
+            float(optimizer_config["learning_rate"]),
+            float(optimizer_config["epsilon"]),
+        )
+        <= 0
+    ):
+        raise ValueError("Adam learning_rate and epsilon must be positive")
     device = _device(training_config["device"])
     rows: list[dict[str, Any]] = []
     results_path = output / "runs.csv"
@@ -236,17 +257,26 @@ def run(
                     validation_loss = float("nan")
                     parameters = 0
                 else:
-                    model = build_model(
-                        name,
-                        window,
-                        horizon,
-                        hyper_hidden=int(model_config["hyper_hidden"]),
-                        cnn_channels=int(model_config["cnn_channels"]),
-                        cnn_kernel_size=int(model_config["cnn_kernel_size"]),
-                        lstm_hidden=int(model_config["lstm_hidden"]),
-                        dropout=float(model_config["dropout"]),
-                        hyper_pool_size=int(model_config["hyper_pool_size"]),
-                    )
+                    if name == "linear":
+                        model = build_model(name, window, horizon)
+                    else:
+                        settings_name = "hyper" if name.startswith("hyper_") else name
+                        settings = model_config[settings_name]
+                        model = build_model(
+                            name,
+                            window,
+                            horizon,
+                            first_layer_units=int(settings["units"]),
+                            conv_kernel_size=(
+                                int(settings["kernel_size"]) if name == "cnn" else None
+                            ),
+                            dense_before_pool=bool(settings["dense_before_pool"]),
+                            dense_after_pool=bool(settings["dense_after_pool"]),
+                            dense_units=int(settings["dense_units"]),
+                            activation=str(settings["activation"]),
+                            dropout=float(settings["dropout"]),
+                            pool_size=int(settings["pool_size"]),
+                        )
                     parameters = parameter_count(model)
                     fitted = fit_model(
                         model,
@@ -255,8 +285,20 @@ def run(
                         seed=int(seed),
                         epochs=int(epochs),
                         batch_size=int(training_config["batch_size"]),
-                        learning_rate=float(training_config["learning_rate"]),
-                        patience=int(training_config["patience"]),
+                        learning_rate=float(optimizer_config["learning_rate"]),
+                        adam_beta1=beta1,
+                        adam_beta2=beta2,
+                        adam_epsilon=float(optimizer_config["epsilon"]),
+                        adam_amsgrad=bool(optimizer_config["amsgrad"]),
+                        loss_name=str(training_config["loss"]),
+                        shuffle=bool(training_config["shuffle"]),
+                        early_stopping_patience=patience,
+                        early_stopping_min_delta=float(
+                            training_config["early_stopping_min_delta"]
+                        ),
+                        restore_best_weights=bool(
+                            training_config["restore_best_weights"]
+                        ),
                         device=device,
                     )
                     prediction_scaled = predict(

@@ -17,11 +17,22 @@ experiment:
     epochs: 3
 
 training:
-  batch_size: 64
+  # Paper: Adam, MSE, 50 epochs, Keras default batch size 32, shuffled batches.
+  optimizer:
+    name: adam
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-7
+    amsgrad: false
+  loss: mse
+  batch_size: 32
   evaluation_batch_size: 256
-  epochs: 20
-  learning_rate: 0.001
-  patience: 5
+  epochs: 50
+  shuffle: true
+  early_stopping_patience: null
+  early_stopping_min_delta: 0.0
+  restore_best_weights: false
   device: cpu
 
 models:
@@ -33,9 +44,30 @@ models:
     - hyper_quaternion
     - hyper_coquaternion
     - hyper_cl11
-  hyper_hidden: 8
-  cnn_channels: 16
-  cnn_kernel_size: 3
-  lstm_hidden: 16
-  dropout: 0.10
-  hyper_pool_size: 2
+  # Concrete points inside the paper's grid-search spaces. Settings are kept
+  # separate because the paper selected them independently for each model.
+  cnn:
+    units: 16
+    kernel_size: 3
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2
+  lstm:
+    units: 16
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2
+  hyper:
+    units: 8
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2

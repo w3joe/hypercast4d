@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import torch
 from torch import nn
 
@@ -23,7 +21,7 @@ class HyperDense(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        algebra: str | Algebra = "quaternion",
+        algebra: str | Algebra,
         bias: bool = True,
     ) -> None:
         super().__init__()
@@ -41,10 +39,12 @@ class HyperDense(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        bound = 1.0 / math.sqrt(self.in_features)
-        nn.init.uniform_(self.weight, -bound, bound)
+        # The supplementary TensorFlow layer initializes each component kernel
+        # independently with Glorot normal and initializes its bias to zero.
+        for component in self.weight:
+            nn.init.xavier_normal_(component)
         if self.bias is not None:
-            nn.init.uniform_(self.bias, -bound, bound)
+            nn.init.zeros_(self.bias)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         expected = COMPONENT_COUNT * self.in_features

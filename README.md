@@ -20,7 +20,7 @@ a terminal and run:
 ```bash
 cd hypercast4d
 source .venv/bin/activate
-pytest
+python -m pytest
 hypercast4d-run --quick
 ```
 
@@ -35,8 +35,7 @@ hypercast4d-run
 ```
 
 The complete evaluation runs seven models on three forecasting configurations
-with five random seeds, producing 105 result rows. On the development machine
-it took roughly 30 seconds on CPU, although runtime will vary by computer.
+with five random seeds, producing 105 result rows. Runtime varies by computer.
 
 When you are finished, leave the environment with:
 
@@ -93,7 +92,7 @@ silently using different inputs. Inspect any changed archive before using the
 Verify the installation with:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 The full test suite should pass.
@@ -127,7 +126,7 @@ hypercast4d-run --config configs/evaluation.yaml
 ## Live results dashboard
 
 HyperCast4D includes a local browser dashboard with no extra web-framework
-dependency. To view the existing complete results, run:
+dependency. To view the configured full-run output, run:
 
 ```bash
 hypercast4d-dashboard
@@ -206,11 +205,21 @@ experiment:
     epochs: 3
 
 training:
-  batch_size: 64
+  optimizer:
+    name: adam
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-7
+    amsgrad: false
+  loss: mse
+  batch_size: 32
   evaluation_batch_size: 256
-  epochs: 20
-  learning_rate: 0.001
-  patience: 5
+  epochs: 50
+  shuffle: true
+  early_stopping_patience: null
+  early_stopping_min_delta: 0.0
+  restore_best_weights: false
   device: cpu
 
 models:
@@ -222,12 +231,31 @@ models:
     - hyper_quaternion
     - hyper_coquaternion
     - hyper_cl11
-  hyper_hidden: 8
-  cnn_channels: 16
-  cnn_kernel_size: 3
-  lstm_hidden: 16
-  dropout: 0.10
-  hyper_pool_size: 2
+  cnn:
+    units: 16
+    kernel_size: 3
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2
+  lstm:
+    units: 16
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2
+  hyper:
+    units: 8
+    dense_before_pool: true
+    dense_after_pool: true
+    dense_units: 32
+    activation: relu
+    dropout: 0.50
+    pool_size: 2
 ```
 
 - `window` is the number of historical observations supplied to a model.
@@ -236,12 +264,19 @@ models:
   the internal target component.
 - `seeds` controls repeated training runs.
 - `epochs` is the maximum number of passes through the training data.
-- `patience` enables early stopping when validation error stops improving.
+- `optimizer`, `loss`, `batch_size`, `epochs`, and `shuffle` expose the paper's
+  training choices. Adam's learning rate, betas, epsilon, and AMSGrad flag are
+  explicit; the defaults match TensorFlow/Keras 2.12 rather than silently using
+  PyTorch's slightly different Adam epsilon.
+- Set `early_stopping_patience` to an integer and
+  `restore_best_weights: true` to enable the corrected runner's optional
+  early-stopping behavior. The paper-aligned defaults disable it.
 - `device` can remain `cpu`; `auto` selects CUDA, Apple MPS, or CPU when
   available.
 - `models.enabled` selects which model implementations are evaluated.
-- `cnn_kernel_size` and `hyper_pool_size` configure previously fixed
-  architecture choices.
+- Each trainable model has its own first-layer width, optional dense layers,
+  dense width, activation, dropout, and pooling settings. The CNN kernel is
+  independently configurable too.
 
 Give custom experiments a different `output_dir` so they do not overwrite an
 earlier run.
@@ -259,7 +294,8 @@ The default configuration evaluates:
 - `hyper_cl11`: a Clifford `Cl(1,1)` HyperDense front end.
 
 The three hypercomplex variants use the same surrounding architecture. Only
-the multiplication table changes, making the algebra comparison explicit.
+the multiplication table changes, making the algebra comparison explicit and
+avoiding the supplementary notebook's accidental quaternion override.
 
 ## Output files
 
@@ -282,22 +318,6 @@ a more complicated model is not useful if it cannot beat that baseline.
 memory sampled after each fit. It is a coarse ceiling and can accumulate across
 models. Use isolated processes or a device profiler for publication-quality
 memory measurements.
-
-## Initial result
-
-The initial CPU run used the committed configuration with five seeds. Mean test
-MAE was:
-
-| Window / horizon | Persistence | Linear | Best hypercomplex variant |
-|---|---:|---:|---:|
-| 10 / 1 | **0.0534** | 0.1168 | quaternion, 0.1354 |
-| 20 / 5 | **0.0868** | 0.1367 | quaternion, 0.2027 |
-| 60 / 20 | **0.1503** | 0.2265 | coquaternion, 0.3304 |
-
-Persistence won all three cells, and the best algebra was not stable across
-horizons. This is useful negative evidence under a bounded evaluation, not a
-claim that hypercomplex forecasting can never work. The architectures have not
-received equally extensive hyperparameter tuning.
 
 ## What the paper proposes
 
@@ -337,6 +357,37 @@ HyperCast4D does not copy KHNN or the supplementary source code. Its PyTorch
 layer was independently implemented from the paper's multiplication tables and
 checked against the archived block-matrix convention.
 
+## Paper fidelity and scope
+
+The implementation matches the paper and its supplementary notebook at the
+model level:
+
+- the input is an ordered 4-tuple of Copper, FCX, CLP, and SCCO, and the output
+  is a sequence of future Copper values;
+- quaternion, coquaternion, and `Cl(1,1)` products use the published tables and
+  input-by-weight orientation;
+- `HyperDense` uses four Glorot-normal component kernels and a zero bias;
+- CNN uses a causal, stride-one Conv1D; LSTM returns its full sequence;
+- the shared Figure 3 scaffold is optional dense layer, max pooling, flatten,
+  optional dense layer, dropout, and a real dense forecast head;
+- the default dropout is `0.5`, max-pool size is `2`, convolution kernel is
+  `3`, and training uses Adam, MSE, 50 epochs, and batch size `32`.
+
+This repository is a **bounded, corrected evaluation**, not a bit-for-bit
+reproduction of the paper's grid search. The committed YAML chooses one
+explicit architecture from each published search space and evaluates three of
+the paper's sixteen window/horizon cells over five seeds. Persistence and
+linear models are additional baselines. Reproducing the paper's complete
+search would require 159 CNN, 159 LSTM, and 575 hypercomplex candidates for
+each cell under ten-fold cross-validation.
+
+The only values fixed in source are implementation invariants: four algebra
+components, the three published multiplication tables, the supported model
+registry, and the publisher download URL/checksum. Dataset paths, target,
+splits, cells, seeds, training controls, first-layer widths, optional dense
+layers, activations, dropout, pooling, and output locations are configuration
+values.
+
 ## Why this evaluation differs from the archived notebook
 
 Inspection of the paper's supplementary notebook found several issues:
@@ -355,7 +406,8 @@ Inspection of the paper's supplementary notebook found several issues:
 HyperCast4D therefore uses a corrected `chronological-v1` protocol: scaling is
 fitted only on training rows, target windows cannot cross split boundaries, and
 the final test partition remains untouched during training and model selection.
-It does not claim bit-for-bit reproduction of the published tables.
+This intentionally differs from the paper's evaluation protocol while keeping
+the tested neural-network architecture aligned with Figure 3.
 
 ## Troubleshooting
 

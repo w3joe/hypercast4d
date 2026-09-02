@@ -115,8 +115,8 @@ def prepare_windows(
     frame: pd.DataFrame,
     window: int,
     horizon: int,
-    train_fraction: float = 0.70,
-    validation_fraction: float = 0.15,
+    train_fraction: float,
+    validation_fraction: float,
 ) -> PreparedData:
     """Scale on training rows and create non-overlapping target partitions.
 

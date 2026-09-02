@@ -36,7 +36,7 @@ def test_gradients_are_finite() -> None:
 
 
 def test_expected_parameter_reduction() -> None:
-    layer = HyperDense(3, 5)
+    layer = HyperDense(3, 5, algebra="quaternion")
     hyper_parameters = sum(parameter.numel() for parameter in layer.parameters())
     real_parameters = (4 * 3) * (4 * 5) + 4 * 5
     assert hyper_parameters == 4 * 3 * 5 + 4 * 5
