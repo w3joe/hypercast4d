@@ -11,6 +11,9 @@ from dataclasses import dataclass
 import torch
 
 
+COMPONENT_COUNT = 4
+
+
 @dataclass(frozen=True)
 class Algebra:
     """A named real four-dimensional algebra."""
@@ -20,15 +23,19 @@ class Algebra:
 
     def multiply(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
         """Multiply tensors whose final axis stores four basis coefficients."""
-        if left.shape[-1] != 4 or right.shape[-1] != 4:
-            raise ValueError("Hypercomplex operands must have final dimension 4")
+        if left.shape[-1] != COMPONENT_COUNT or right.shape[-1] != COMPONENT_COUNT:
+            raise ValueError(
+                f"Hypercomplex operands must have final dimension {COMPONENT_COUNT}"
+            )
         constants = self.constants.to(device=left.device, dtype=left.dtype)
         return torch.einsum("...a,...b,abc->...c", left, right, constants)
 
 
 def _constants(products: dict[tuple[int, int], tuple[float, int]]) -> torch.Tensor:
-    result = torch.zeros(4, 4, 4, dtype=torch.float64)
-    for basis in range(4):
+    result = torch.zeros(
+        COMPONENT_COUNT, COMPONENT_COUNT, COMPONENT_COUNT, dtype=torch.float64
+    )
+    for basis in range(COMPONENT_COUNT):
         result[0, basis, basis] = 1.0
         result[basis, 0, basis] = 1.0
     for (left, right), (sign, output) in products.items():

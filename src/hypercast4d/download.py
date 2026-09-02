@@ -44,7 +44,7 @@ def download(
     archive = destination / "supplement.zip"
     if force or not archive.exists():
         request = urllib.request.Request(
-            SUPPLEMENT_URL, headers={"User-Agent": "HyperCast4D/0.1"}
+            SUPPLEMENT_URL, headers={"User-Agent": "HyperCast4D"}
         )
         with (
             urllib.request.urlopen(request, timeout=60) as response,

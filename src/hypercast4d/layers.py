@@ -7,7 +7,7 @@ import math
 import torch
 from torch import nn
 
-from .algebras import Algebra, get_algebra
+from .algebras import COMPONENT_COUNT, Algebra, get_algebra
 
 
 class HyperDense(nn.Module):
@@ -32,8 +32,12 @@ class HyperDense(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.algebra = get_algebra(algebra) if isinstance(algebra, str) else algebra
-        self.weight = nn.Parameter(torch.empty(4, in_features, out_features))
-        self.bias = nn.Parameter(torch.empty(4, out_features)) if bias else None
+        self.weight = nn.Parameter(
+            torch.empty(COMPONENT_COUNT, in_features, out_features)
+        )
+        self.bias = (
+            nn.Parameter(torch.empty(COMPONENT_COUNT, out_features)) if bias else None
+        )
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -43,12 +47,14 @@ class HyperDense(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        expected = 4 * self.in_features
+        expected = COMPONENT_COUNT * self.in_features
         if inputs.shape[-1] != expected:
             raise ValueError(
                 f"Expected final dimension {expected}, got {inputs.shape[-1]}"
             )
-        components = inputs.reshape(*inputs.shape[:-1], 4, self.in_features)
+        components = inputs.reshape(
+            *inputs.shape[:-1], COMPONENT_COUNT, self.in_features
+        )
         constants = self.algebra.constants.to(inputs.device, inputs.dtype)
         # ``components`` supplies the left factor and ``weight`` the right one,
         # matching the block matrix in the paper's archived HyperDense layer.
@@ -57,7 +63,7 @@ class HyperDense(nn.Module):
         )
         if self.bias is not None:
             outputs = outputs + self.bias
-        return outputs.reshape(*inputs.shape[:-1], 4 * self.out_features)
+        return outputs.reshape(*inputs.shape[:-1], COMPONENT_COUNT * self.out_features)
 
     def extra_repr(self) -> str:
         return (

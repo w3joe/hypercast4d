@@ -108,12 +108,15 @@ def fit_model(
 
 
 def predict(
-    model: nn.Module, dataset: TensorDataset, device: torch.device
+    model: nn.Module,
+    dataset: TensorDataset,
+    device: torch.device,
+    batch_size: int,
 ) -> np.ndarray:
     model.eval()
     batches: list[np.ndarray] = []
     with torch.no_grad():
-        for features, _ in DataLoader(dataset, batch_size=256):
+        for features, _ in DataLoader(dataset, batch_size=batch_size):
             batches.append(model(features.to(device)).cpu().numpy())
     return np.concatenate(batches)
 

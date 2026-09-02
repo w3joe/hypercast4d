@@ -127,7 +127,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   <section class="panel">
     <div class="panel-head">
       <h2>Mean test MAE by model</h2>
-      <span class="note">Lower is better · updates every 1.5 seconds</span>
+      <span class="note">Lower is better · updates every __REFRESH_SECONDS__ seconds</span>
     </div>
     <svg id="chart" viewBox="0 0 1000 420" role="img" aria-label="Live mean absolute error chart"></svg>
     <div id="legend" class="legend"></div>
@@ -153,6 +153,12 @@ const colors = {
   persistence:'#4cc9f0', linear:'#f7b267', cnn:'#ff6b6b', lstm:'#c77dff',
   hyper_quaternion:'#47d7ac', hyper_coquaternion:'#80ed99', hyper_cl11:'#ffd166'
 };
+const fallbackColors = ['#90dbf4','#f1c0e8','#cfbaf0','#a3c4f3','#fde4cf'];
+function colorFor(model) {
+  if (colors[model]) return colors[model];
+  let hash=0; for (const character of model) hash=(hash*31+character.charCodeAt(0))>>>0;
+  return fallbackColors[hash%fallbackColors.length];
+}
 const svgNS = 'http://www.w3.org/2000/svg';
 function el(name, attrs={}, text='') {
   const node = document.createElementNS(svgNS, name);
@@ -179,7 +185,8 @@ function drawChart(rows) {
     return;
   }
   const cells = [...new Set(summary.map(r=>`${r.window}/${r.horizon}`))].sort((a,b)=>Number(a.split('/')[0])-Number(b.split('/')[0]));
-  const models = order.filter(model => summary.some(row=>row.model===model));
+  const observed = [...new Set(summary.map(row=>row.model))];
+  const models = [...order.filter(model=>observed.includes(model)), ...observed.filter(model=>!order.includes(model))];
   const maxValue = Math.max(...summary.map(row=>row.mae)) * 1.15;
   const margin = {left:72,right:22,top:20,bottom:70};
   const width = 1000-margin.left-margin.right, height=420-margin.top-margin.bottom;
@@ -197,14 +204,14 @@ function drawChart(rows) {
       if (!row) return;
       const h=(row.mae/maxValue)*height;
       const x=center-(models.length*barWidth)/2+modelIndex*barWidth;
-      const rect=el('rect',{x:x+1,y:margin.top+height-h,width:Math.max(barWidth-2,2),height:h,rx:3,fill:colors[model]||'#fff'});
+      const rect=el('rect',{x:x+1,y:margin.top+height-h,width:Math.max(barWidth-2,2),height:h,rx:3,fill:colorFor(model)});
       rect.appendChild(el('title',{},`${model} · w${row.window}/h${row.horizon} · mean MAE ${row.mae.toFixed(5)}`));
       svg.appendChild(rect);
     });
     svg.appendChild(el('text',{x:center,y:margin.top+height+27,'text-anchor':'middle',fill:'#edf5ff','font-size':13},`w${cell.split('/')[0]} / h${cell.split('/')[1]}`));
   });
   const legend=document.getElementById('legend'); legend.replaceChildren();
-  models.forEach(model=>{const item=document.createElement('span');item.style.setProperty('--color',colors[model]);item.textContent=model;legend.appendChild(item);});
+  models.forEach(model=>{const item=document.createElement('span');item.style.setProperty('--color',colorFor(model));item.textContent=model;legend.appendChild(item);});
 }
 function renderTable(rows) {
   const body=document.getElementById('runs-body'); body.replaceChildren();
@@ -237,7 +244,7 @@ async function poll() {
     document.getElementById('status-badge').textContent='Waiting for result files';
   }
 }
-poll(); setInterval(poll,1500);
+poll(); setInterval(poll,__REFRESH_MILLISECONDS__);
 </script>
 </body>
 </html>
@@ -284,7 +291,13 @@ def load_status(results_directory: Path, row_count: int) -> dict[str, object]:
     return {"state": "waiting", "completed": 0, "total": 0}
 
 
-def handler_for(results_directory: Path) -> type[BaseHTTPRequestHandler]:
+def handler_for(
+    results_directory: Path, refresh_seconds: float = 1.5
+) -> type[BaseHTTPRequestHandler]:
+    dashboard_html = DASHBOARD_HTML.replace(
+        "__REFRESH_MILLISECONDS__", str(round(refresh_seconds * 1000))
+    ).replace("__REFRESH_SECONDS__", f"{refresh_seconds:g}")
+
     class DashboardHandler(BaseHTTPRequestHandler):
         def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
             self.send_response(status)
@@ -303,7 +316,7 @@ def handler_for(results_directory: Path) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             if path == "/":
-                self._send(DASHBOARD_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                self._send(dashboard_html.encode("utf-8"), "text/html; charset=utf-8")
                 return
             rows = load_runs(results_directory)
             if path == "/api/runs":
@@ -328,10 +341,15 @@ def main() -> None:
     parser.add_argument("--results", type=Path, default=Path("results/evaluation"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--refresh-seconds", type=float, default=1.5)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
+    if args.refresh_seconds <= 0:
+        parser.error("--refresh-seconds must be positive")
 
-    server = ThreadingHTTPServer((args.host, args.port), handler_for(args.results))
+    server = ThreadingHTTPServer(
+        (args.host, args.port), handler_for(args.results, args.refresh_seconds)
+    )
     url = f"http://{args.host}:{args.port}"
     print(f"HyperCast4D dashboard: {url}")
     print(f"Watching results in: {args.results.resolve()}")

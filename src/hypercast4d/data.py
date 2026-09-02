@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 from torch.utils.data import TensorDataset
 
+from .algebras import COMPONENT_COUNT
+
 
 @dataclass(frozen=True)
 class MinMaxStats:
@@ -78,9 +80,10 @@ def load_paper_data(path: str | Path, target_column: str | None = None) -> pd.Da
         frame.index = parsed
 
     numeric = frame.select_dtypes(include=[np.number]).copy()
-    if numeric.shape[1] != 4:
+    if numeric.shape[1] != COMPONENT_COUNT:
         raise ValueError(
-            f"Expected exactly four numeric series, found {numeric.shape[1]}: "
+            f"Expected exactly {COMPONENT_COUNT} numeric series, "
+            f"found {numeric.shape[1]}: "
             f"{list(numeric.columns)}"
         )
     if numeric.isna().any().any():

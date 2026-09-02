@@ -1,6 +1,6 @@
 data:
   path: data/raw/paper_data.xlsx
-  target_column: null
+  target_column: Copper
   train_fraction: 0.70
   validation_fraction: 0.15
 
@@ -11,16 +11,31 @@ experiment:
     - {window: 20, horizon: 5}
     - {window: 60, horizon: 20}
   seeds: [7, 19, 31, 43, 59]
+  quick:
+    cell_count: 1
+    seed_count: 1
+    epochs: 3
 
 training:
   batch_size: 64
+  evaluation_batch_size: 256
   epochs: 20
   learning_rate: 0.001
   patience: 5
   device: cpu
 
 models:
+  enabled:
+    - persistence
+    - linear
+    - cnn
+    - lstm
+    - hyper_quaternion
+    - hyper_coquaternion
+    - hyper_cl11
   hyper_hidden: 8
   cnn_channels: 16
+  cnn_kernel_size: 3
   lstm_hidden: 16
   dropout: 0.10
+  hyper_pool_size: 2

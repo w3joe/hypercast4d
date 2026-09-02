@@ -24,7 +24,7 @@ from .models import build_model, parameter_count
 from .training import error_metrics, fit_model, predict, seed_everything
 
 
-MODEL_NAMES = (
+SUPPORTED_MODEL_NAMES = (
     "persistence",
     "linear",
     "cnn",
@@ -123,13 +123,23 @@ def _plot(summary: pd.DataFrame, destination: Path) -> None:
 
     efficiency = summary[summary["model"] != "persistence"]
     fig, axis = plt.subplots(figsize=(7.5, 5.5))
-    for model, rows in efficiency.groupby("model", sort=False):
-        axis.scatter(rows["parameters_mean"], rows["mae_mean"], label=model, s=55)
-    axis.set_xscale("log")
+    if efficiency.empty:
+        axis.text(
+            0.5,
+            0.5,
+            "No trainable models enabled",
+            ha="center",
+            va="center",
+            transform=axis.transAxes,
+        )
+    else:
+        for model, rows in efficiency.groupby("model", sort=False):
+            axis.scatter(rows["parameters_mean"], rows["mae_mean"], label=model, s=55)
+        axis.set_xscale("log")
+        axis.legend(fontsize=8)
     axis.set_xlabel("Trainable parameters (log scale)")
     axis.set_ylabel("Mean test MAE")
     axis.set_title("Accuracy–parameter trade-off")
-    axis.legend(fontsize=8)
     axis.grid(alpha=0.25)
     fig.tight_layout()
     fig.savefig(destination / "accuracy_vs_parameters.png", dpi=180)
@@ -143,20 +153,52 @@ def run(
     experiment_config = config["experiment"]
     training_config = config["training"]
     model_config = config["models"]
+    model_names = tuple(model_config["enabled"])
+    unknown_models = sorted(set(model_names) - set(SUPPORTED_MODEL_NAMES))
+    if unknown_models:
+        raise ValueError(f"Unsupported models in configuration: {unknown_models}")
+    if not model_names:
+        raise ValueError("At least one model must be enabled")
+    if len(model_names) != len(set(model_names)):
+        raise ValueError("Enabled model names must be unique")
     frame = load_paper_data(data_config["path"], data_config.get("target_column"))
     output = Path(experiment_config["output_dir"])
     if quick:
         output = output.with_name(f"{output.name}_quick")
     output.mkdir(parents=True, exist_ok=True)
-    cells = experiment_config["cells"][:1] if quick else experiment_config["cells"]
-    seeds = experiment_config["seeds"][:1] if quick else experiment_config["seeds"]
-    epochs = min(3, training_config["epochs"]) if quick else training_config["epochs"]
-    device = _device(training_config.get("device", "cpu"))
+    quick_config = experiment_config["quick"]
+    if quick:
+        quick_cell_count = int(quick_config["cell_count"])
+        quick_seed_count = int(quick_config["seed_count"])
+        quick_epochs = int(quick_config["epochs"])
+        if min(quick_cell_count, quick_seed_count, quick_epochs) < 1:
+            raise ValueError(
+                "Quick-run cell_count, seed_count, and epochs must be positive"
+            )
+        cells = experiment_config["cells"][:quick_cell_count]
+        seeds = experiment_config["seeds"][:quick_seed_count]
+        epochs = min(quick_epochs, int(training_config["epochs"]))
+    else:
+        cells = experiment_config["cells"]
+        seeds = experiment_config["seeds"]
+        epochs = int(training_config["epochs"])
+    if not cells or not seeds:
+        raise ValueError("Experiment cells and seeds must not be empty")
+    if (
+        min(
+            epochs,
+            int(training_config["batch_size"]),
+            int(training_config["evaluation_batch_size"]),
+        )
+        < 1
+    ):
+        raise ValueError("Epoch and batch-size settings must be positive")
+    device = _device(training_config["device"])
     rows: list[dict[str, Any]] = []
     results_path = output / "runs.csv"
     status_path = output / "status.json"
     started_at = datetime.now(UTC).isoformat()
-    total_runs = len(cells) * len(seeds) * len(MODEL_NAMES)
+    total_runs = len(cells) * len(seeds) * len(model_names)
     _write_live_results(results_path, rows)
     _write_status(
         status_path,
@@ -182,7 +224,7 @@ def run(
         target = prepared.scaler.inverse_target(target_scaled)
 
         for seed in seeds:
-            for name in MODEL_NAMES:
+            for name in model_names:
                 seed_everything(int(seed))
                 if name == "persistence":
                     prediction_scaled = np.repeat(
@@ -200,8 +242,10 @@ def run(
                         horizon,
                         hyper_hidden=int(model_config["hyper_hidden"]),
                         cnn_channels=int(model_config["cnn_channels"]),
+                        cnn_kernel_size=int(model_config["cnn_kernel_size"]),
                         lstm_hidden=int(model_config["lstm_hidden"]),
                         dropout=float(model_config["dropout"]),
+                        hyper_pool_size=int(model_config["hyper_pool_size"]),
                     )
                     parameters = parameter_count(model)
                     fitted = fit_model(
@@ -215,7 +259,12 @@ def run(
                         patience=int(training_config["patience"]),
                         device=device,
                     )
-                    prediction_scaled = predict(model, test_data, device)
+                    prediction_scaled = predict(
+                        model,
+                        test_data,
+                        device,
+                        int(training_config["evaluation_batch_size"]),
+                    )
                     train_seconds = fitted.train_seconds
                     peak_memory = fitted.process_peak_rss_mb
                     epochs_ran = fitted.epochs_ran

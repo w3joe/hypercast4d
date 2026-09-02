@@ -18,7 +18,7 @@ The environment and paper dataset are already prepared in this workspace. Open
 a terminal and run:
 
 ```bash
-cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
+cd hypercast4d
 source .venv/bin/activate
 pytest
 hypercast4d-run --quick
@@ -96,7 +96,7 @@ Verify the installation with:
 pytest
 ```
 
-All 27 tests should pass.
+The full test suite should pass.
 
 ## Run an evaluation
 
@@ -146,7 +146,7 @@ To watch a new full evaluation live, use two terminals.
 Terminal 1:
 
 ```bash
-cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
+cd hypercast4d
 source .venv/bin/activate
 hypercast4d-dashboard
 ```
@@ -154,14 +154,14 @@ hypercast4d-dashboard
 Terminal 2:
 
 ```bash
-cd "/Users/w3joe/Desktop/Quantum Works/hypercast4d"
+cd hypercast4d
 source .venv/bin/activate
 hypercast4d-run
 ```
 
 The runner writes `runs.csv` and `status.json` atomically after every completed
-model. The dashboard polls those files every 1.5 seconds, so bars and progress
-appear while training continues.
+model. The dashboard polls those files every 1.5 seconds by default, so bars
+and progress appear while training continues.
 
 To watch a quick evaluation instead:
 
@@ -171,8 +171,9 @@ hypercast4d-dashboard --results results/evaluation_quick
 
 Then run `hypercast4d-run --quick` in the second terminal. Use `Ctrl-C` to stop
 the dashboard server. Pass `--no-browser` if you do not want it to open a tab
-automatically, or choose another port with `--port 9000`. The server binds to
-`127.0.0.1` by default, and no experiment data is uploaded anywhere.
+automatically, choose another port with `--port 9000`, or change the polling
+interval with `--refresh-seconds 3`. The server binds to `127.0.0.1` by default,
+and no experiment data is uploaded anywhere.
 
 ### Customize the experiment
 
@@ -186,6 +187,12 @@ hypercast4d-run --config configs/my_experiment.yaml
 The important settings are:
 
 ```yaml
+data:
+  path: data/raw/paper_data.xlsx
+  target_column: Copper
+  train_fraction: 0.70
+  validation_fraction: 0.15
+
 experiment:
   output_dir: results/evaluation
   cells:
@@ -193,29 +200,55 @@ experiment:
     - {window: 20, horizon: 5}
     - {window: 60, horizon: 20}
   seeds: [7, 19, 31, 43, 59]
+  quick:
+    cell_count: 1
+    seed_count: 1
+    epochs: 3
 
 training:
   batch_size: 64
+  evaluation_batch_size: 256
   epochs: 20
   learning_rate: 0.001
   patience: 5
   device: cpu
+
+models:
+  enabled:
+    - persistence
+    - linear
+    - cnn
+    - lstm
+    - hyper_quaternion
+    - hyper_coquaternion
+    - hyper_cl11
+  hyper_hidden: 8
+  cnn_channels: 16
+  cnn_kernel_size: 3
+  lstm_hidden: 16
+  dropout: 0.10
+  hyper_pool_size: 2
 ```
 
 - `window` is the number of historical observations supplied to a model.
 - `horizon` is the number of future Copper values predicted at once.
+- `target_column` explicitly selects the series to forecast and moves it into
+  the internal target component.
 - `seeds` controls repeated training runs.
 - `epochs` is the maximum number of passes through the training data.
 - `patience` enables early stopping when validation error stops improving.
 - `device` can remain `cpu`; `auto` selects CUDA, Apple MPS, or CPU when
   available.
+- `models.enabled` selects which model implementations are evaluated.
+- `cnn_kernel_size` and `hyper_pool_size` configure previously fixed
+  architecture choices.
 
 Give custom experiments a different `output_dir` so they do not overwrite an
 earlier run.
 
 ## Models included
 
-Every experiment evaluates:
+The default configuration evaluates:
 
 - `persistence`: repeats the most recently observed Copper value;
 - `linear`: an ordinary real-valued linear model;
