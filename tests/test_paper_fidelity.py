@@ -5,6 +5,7 @@ import torch
 import yaml
 
 from hypercast4d.layers import HyperDense
+from hypercast4d.experiment import _tensorboard_log_path
 from hypercast4d.models import PaperForecaster, parameter_count
 
 
@@ -13,6 +14,13 @@ NOTEBOOK_TABLES = {
     "coquaternion": torch.tensor([[-1, 1, -1], [-1, 1, -1], [1, 1, 1]]),
     "cl11": torch.tensor([[1, 1, 1], [-1, -1, 1], [-1, -1, 1]]),
 }
+
+
+def test_tensorboard_log_path_separates_experiments_and_runs(tmp_path: Path) -> None:
+    assert (
+        _tensorboard_log_path(tmp_path, "experiment", 20, 5, "hyper_cl11", 19)
+        == tmp_path / "experiment" / "w20_h5" / "hyper_cl11" / "seed_19"
+    )
 
 
 def test_committed_config_stays_inside_paper_search_space() -> None:

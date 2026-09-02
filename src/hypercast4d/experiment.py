@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from torch.utils.tensorboard import SummaryWriter
 
 from .data import load_paper_data, prepare_windows
 from .models import build_model, parameter_count
@@ -93,6 +94,75 @@ def _device(name: str) -> torch.device:
     return torch.device(name)
 
 
+def _tensorboard_log_path(
+    root: Path,
+    experiment_id: str,
+    window: int,
+    horizon: int,
+    model: str,
+    seed: int,
+) -> Path:
+    return root / experiment_id / f"w{window}_h{horizon}" / model / f"seed_{seed}"
+
+
+def _log_tensorboard_result(
+    writer: SummaryWriter,
+    *,
+    window: int,
+    horizon: int,
+    seed: int,
+    model: str,
+    epochs_ran: int,
+    epochs_requested: int,
+    parameters: int,
+    train_seconds: float,
+    metrics: dict[str, float],
+    model_settings: dict[str, Any],
+    training_config: dict[str, Any],
+) -> None:
+    step = max(epochs_ran, 0)
+    writer.add_scalar("metrics/test_mae_original_units", metrics["mae"], step)
+    writer.add_scalar("metrics/test_mse_original_units", metrics["mse"], step)
+    writer.add_scalar("model/trainable_parameters", parameters, step)
+    writer.add_scalar("timing/train_seconds", train_seconds, step)
+    effective_config = {
+        "model": model,
+        "window": window,
+        "horizon": horizon,
+        "seed": seed,
+        "epochs_requested": epochs_requested,
+        "epochs_ran": epochs_ran,
+        "batch_size": int(training_config["batch_size"]),
+        "loss": str(training_config["loss"]),
+        "shuffle": bool(training_config["shuffle"]),
+        "early_stopping_patience": (
+            training_config["early_stopping_patience"]
+            if training_config["early_stopping_patience"] is not None
+            else "disabled"
+        ),
+        "restore_best_weights": bool(training_config["restore_best_weights"]),
+        **{
+            f"optimizer_{key}": value
+            for key, value in training_config["optimizer"].items()
+        },
+        **{f"model_{key}": value for key, value in model_settings.items()},
+    }
+    writer.add_text(
+        "run/effective_configuration",
+        f"```json\n{json.dumps(effective_config, indent=2)}\n```",
+        0,
+    )
+    writer.add_hparams(
+        effective_config,
+        {
+            "hparam/test_mae": metrics["mae"],
+            "hparam/test_mse": metrics["mse"],
+        },
+        run_name="hparams",
+    )
+    writer.flush()
+
+
 def _plot(summary: pd.DataFrame, destination: Path) -> None:
     labels = [f"w{row.window}/h{row.horizon}" for row in summary.itertuples()]
     models = list(dict.fromkeys(summary["model"]))
@@ -153,6 +223,7 @@ def run(
     experiment_config = config["experiment"]
     training_config = config["training"]
     optimizer_config = training_config["optimizer"]
+    tensorboard_config = config["tensorboard"]
     model_config = config["models"]
     model_names = tuple(model_config["enabled"])
     unknown_models = sorted(set(model_names) - set(SUPPORTED_MODEL_NAMES))
@@ -214,11 +285,24 @@ def run(
         <= 0
     ):
         raise ValueError("Adam learning_rate and epsilon must be positive")
+    tensorboard_enabled = bool(tensorboard_config["enabled"])
+    tensorboard_flush_seconds = int(tensorboard_config["flush_seconds"])
+    if tensorboard_flush_seconds < 1:
+        raise ValueError("tensorboard.flush_seconds must be positive")
     device = _device(training_config["device"])
     rows: list[dict[str, Any]] = []
     results_path = output / "runs.csv"
     status_path = output / "status.json"
-    started_at = datetime.now(UTC).isoformat()
+    started = datetime.now(UTC)
+    started_at = started.isoformat()
+    experiment_id = started.strftime("%Y%m%dT%H%M%S_%fZ")
+    if quick:
+        experiment_id = f"{experiment_id}_quick"
+    tensorboard_run_dir = (
+        Path(tensorboard_config["log_dir"]) / experiment_id
+        if tensorboard_enabled
+        else None
+    )
     total_runs = len(cells) * len(seeds) * len(model_names)
     _write_live_results(results_path, rows)
     _write_status(
@@ -247,6 +331,20 @@ def run(
         for seed in seeds:
             for name in model_names:
                 seed_everything(int(seed))
+                model_settings: dict[str, Any] = {}
+                writer = None
+                if tensorboard_run_dir is not None:
+                    log_path = _tensorboard_log_path(
+                        Path(tensorboard_config["log_dir"]),
+                        experiment_id,
+                        window,
+                        horizon,
+                        name,
+                        int(seed),
+                    )
+                    writer = SummaryWriter(
+                        log_dir=str(log_path), flush_secs=tensorboard_flush_seconds
+                    )
                 if name == "persistence":
                     prediction_scaled = np.repeat(
                         prepared.test.x[:, -1, 0:1], horizon, axis=1
@@ -261,23 +359,35 @@ def run(
                         model = build_model(name, window, horizon)
                     else:
                         settings_name = "hyper" if name.startswith("hyper_") else name
-                        settings = model_config[settings_name]
+                        model_settings = dict(model_config[settings_name])
                         model = build_model(
                             name,
                             window,
                             horizon,
-                            first_layer_units=int(settings["units"]),
+                            first_layer_units=int(model_settings["units"]),
                             conv_kernel_size=(
-                                int(settings["kernel_size"]) if name == "cnn" else None
+                                int(model_settings["kernel_size"])
+                                if name == "cnn"
+                                else None
                             ),
-                            dense_before_pool=bool(settings["dense_before_pool"]),
-                            dense_after_pool=bool(settings["dense_after_pool"]),
-                            dense_units=int(settings["dense_units"]),
-                            activation=str(settings["activation"]),
-                            dropout=float(settings["dropout"]),
-                            pool_size=int(settings["pool_size"]),
+                            dense_before_pool=bool(model_settings["dense_before_pool"]),
+                            dense_after_pool=bool(model_settings["dense_after_pool"]),
+                            dense_units=int(model_settings["dense_units"]),
+                            activation=str(model_settings["activation"]),
+                            dropout=float(model_settings["dropout"]),
+                            pool_size=int(model_settings["pool_size"]),
                         )
                     parameters = parameter_count(model)
+
+                    def log_epoch(
+                        epoch: int, train_loss: float, validation_loss: float
+                    ) -> None:
+                        if writer is not None:
+                            writer.add_scalar("loss/train_scaled", train_loss, epoch)
+                            writer.add_scalar(
+                                "loss/validation_scaled", validation_loss, epoch
+                            )
+
                     fitted = fit_model(
                         model,
                         train_data,
@@ -300,6 +410,7 @@ def run(
                             training_config["restore_best_weights"]
                         ),
                         device=device,
+                        epoch_callback=log_epoch,
                     )
                     prediction_scaled = predict(
                         model,
@@ -313,6 +424,22 @@ def run(
                     validation_loss = fitted.best_validation_loss
                 prediction = prepared.scaler.inverse_target(prediction_scaled)
                 metrics = error_metrics(prediction, target)
+                if writer is not None:
+                    _log_tensorboard_result(
+                        writer,
+                        window=window,
+                        horizon=horizon,
+                        seed=int(seed),
+                        model=name,
+                        epochs_ran=epochs_ran,
+                        epochs_requested=epochs,
+                        parameters=parameters,
+                        train_seconds=train_seconds,
+                        metrics=metrics,
+                        model_settings=model_settings,
+                        training_config=training_config,
+                    )
+                    writer.close()
                 row = {
                     "window": window,
                     "horizon": horizon,
@@ -366,6 +493,9 @@ def run(
         "torch": torch.__version__,
         "device": str(device),
         "output_dir": str(output),
+        "tensorboard_run_dir": (
+            str(tensorboard_run_dir) if tensorboard_run_dir is not None else None
+        ),
         "columns": list(frame.columns),
         "rows": len(frame),
         "config": config,

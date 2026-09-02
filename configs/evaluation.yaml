@@ -16,6 +16,11 @@ experiment:
     seed_count: 1
     epochs: 3
 
+tensorboard:
+  enabled: true
+  log_dir: runs/tensorboard
+  flush_seconds: 5
+
 training:
   # Paper: Adam, MSE, 50 epochs, Keras default batch size 32, shuffled batches.
   optimizer:

@@ -7,6 +7,7 @@ import platform
 import random
 import resource
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -56,6 +57,7 @@ def fit_model(
     early_stopping_min_delta: float,
     restore_best_weights: bool,
     device: torch.device,
+    epoch_callback: Callable[[int, float, float], None] | None = None,
 ) -> FitResult:
     seed_everything(seed)
     model.to(device)
@@ -88,12 +90,16 @@ def fit_model(
 
     for epoch in range(epochs):
         model.train()
+        total_train_loss = 0.0
+        total_train_items = 0
         for features, targets in train_loader:
             features, targets = features.to(device), targets.to(device)
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(model(features), targets)
             loss.backward()
             optimizer.step()
+            total_train_loss += loss.item() * len(features)
+            total_train_items += len(features)
 
         model.eval()
         total_loss = 0.0
@@ -106,6 +112,12 @@ def fit_model(
                 total_items += len(features)
         validation_loss = total_loss / total_items
         epochs_ran = epoch + 1
+        if epoch_callback is not None:
+            epoch_callback(
+                epochs_ran,
+                total_train_loss / total_train_items,
+                validation_loss,
+            )
         if validation_loss < best_loss - early_stopping_min_delta:
             best_loss = validation_loss
             best_state = copy.deepcopy(model.state_dict())

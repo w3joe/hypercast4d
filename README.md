@@ -174,6 +174,39 @@ automatically, choose another port with `--port 9000`, or change the polling
 interval with `--refresh-seconds 3`. The server binds to `127.0.0.1` by default,
 and no experiment data is uploaded anywhere.
 
+## TensorBoard training diagnostics
+
+TensorBoard logging is enabled in the default configuration. Every invocation
+gets a timestamped directory, and every model run is separated by forecasting
+cell, model, and seed:
+
+```text
+runs/tensorboard/<experiment-id>/w10_h1/hyper_quaternion/seed_7/
+```
+
+Start TensorBoard in one terminal:
+
+```bash
+cd hypercast4d
+source .venv/bin/activate
+tensorboard --logdir runs/tensorboard --port 6006
+```
+
+Then open `http://127.0.0.1:6006` and run `hypercast4d-run` or
+`hypercast4d-run --quick` in another terminal. Event files are flushed during
+training, so the following data appears live:
+
+- scaled training and validation loss for every epoch;
+- final test MAE and MSE in original Copper units;
+- trainable parameter count and training time;
+- the model, window, horizon, seed, and effective model configuration;
+- HParams entries for comparing completed runs.
+
+TensorBoard is intended for training diagnostics. The built-in HyperCast4D
+dashboard remains the simpler view for overall progress and final MAE bars.
+Generated TensorBoard logs are ignored by Git. To disable logging or change its
+location, edit the `tensorboard` section of your copied configuration.
+
 ### Customize the experiment
 
 Copy the configuration and edit the copy:
@@ -203,6 +236,11 @@ experiment:
     cell_count: 1
     seed_count: 1
     epochs: 3
+
+tensorboard:
+  enabled: true
+  log_dir: runs/tensorboard
+  flush_seconds: 5
 
 training:
   optimizer:
@@ -263,6 +301,8 @@ models:
 - `target_column` explicitly selects the series to forecast and moves it into
   the internal target component.
 - `seeds` controls repeated training runs.
+- `tensorboard.enabled` controls event logging; `log_dir` is the parent folder
+  for timestamped experiments and `flush_seconds` controls live-update delay.
 - `epochs` is the maximum number of passes through the training data.
 - `optimizer`, `loss`, `batch_size`, `epochs`, and `shuffle` expose the paper's
   training choices. Adam's learning rate, betas, epsilon, and AMSGrad flag are
