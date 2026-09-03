@@ -29,6 +29,7 @@ from .architecture import (
     presets,
     validate_architecture,
 )
+from .compute import modal_capability, normalize_execution
 from .playground_runner import (
     EVALUATION_DEFAULTS,
     EVALUATION_PRESETS,
@@ -145,12 +146,19 @@ class JobManager:
             if status.get("state") != "queued":
                 continue
             self._update_status(job_id, state="starting")
+            request = _read_json(job_dir / "request.json", {})
+            execution = normalize_execution(request.get("execution"))
+            runner_module = (
+                "hypercast4d.modal_runner"
+                if execution["target"] == "modal"
+                else "hypercast4d.playground_runner"
+            )
             with (job_dir / "training.log").open("a", encoding="utf-8") as log:
                 process = subprocess.Popen(
                     [
                         sys.executable,
                         "-m",
-                        "hypercast4d.playground_runner",
+                        runner_module,
                         "--job-dir",
                         str(job_dir),
                     ],
@@ -228,6 +236,8 @@ class JobManager:
             "architecture_name": request["architecture"]["name"],
             "preset": request["evaluation"]["preset"],
             "protocol": request["evaluation"]["protocol"],
+            "execution_target": request["execution"]["target"],
+            "gpu": request["execution"].get("gpu"),
             "error": None,
         }
         _atomic_json(job_dir / "status.json", status)
@@ -235,17 +245,37 @@ class JobManager:
         return self.get_job(job_id)
 
     def submit_validation(
-        self, architecture: dict[str, Any], evaluation: dict[str, Any] | None
+        self,
+        architecture: dict[str, Any],
+        evaluation: dict[str, Any] | None,
+        execution: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         spec = normalize_architecture_spec(architecture)
-        normalized_evaluation = normalize_evaluation(evaluation)
-        candidate_hash = architecture_hash(spec, normalized_evaluation)
+        normalized_execution = normalize_execution(execution)
+        if normalized_execution["target"] == "modal":
+            capability = modal_capability()
+            if not capability["sdk_installed"]:
+                raise ValueError(
+                    "Modal support is not installed. Install the project with the "
+                    "'modal' extra, then run `modal setup`."
+                )
+            if not capability["authenticated"]:
+                raise ValueError("Modal is not authenticated. Run `modal setup` first.")
+        evaluation_payload = dict(evaluation or {})
+        if normalized_execution["target"] == "modal":
+            evaluation_payload["device"] = "cuda"
+        normalized_evaluation = normalize_evaluation(evaluation_payload)
+        candidate_hash = architecture_hash(
+            spec,
+            {**normalized_evaluation, "execution": normalized_execution},
+        )
         return self._create_job(
             {
                 "phase": "validation",
                 "candidate_hash": candidate_hash,
                 "architecture": spec,
                 "evaluation": normalized_evaluation,
+                "execution": normalized_execution,
             }
         )
 
@@ -275,6 +305,7 @@ class JobManager:
                 "parent_job_dir": str(self.jobs_root / parent_id),
                 "architecture": request["architecture"],
                 "evaluation": request["evaluation"],
+                "execution": request.get("execution", {"target": "local"}),
             }
         )
 
@@ -353,6 +384,13 @@ def create_app(
             "evaluation_defaults": EVALUATION_DEFAULTS,
         }
 
+    @app.get("/api/v1/compute")
+    def compute() -> dict[str, Any]:
+        return {
+            "local": {"available": True},
+            "modal": modal_capability(),
+        }
+
     @app.post("/api/v1/architectures/validate")
     def validate(payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -388,7 +426,9 @@ def create_app(
     def submit_job(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             return manager.submit_validation(
-                payload["architecture"], payload.get("evaluation")
+                payload["architecture"],
+                payload.get("evaluation"),
+                payload.get("execution"),
             )
         except (KeyError, ValueError, ArchitectureError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error

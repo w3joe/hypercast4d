@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["httpx2>=2.0", "pytest>=8.0"]
+modal = ["modal>=1.4,<2"]
 
 [project.scripts]
 hypercast4d-dashboard = "hypercast4d.dashboard:main"

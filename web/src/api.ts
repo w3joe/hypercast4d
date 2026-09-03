@@ -2,7 +2,9 @@ import type {
   ArchitectureRecord,
   ArchitectureSpec,
   Catalog,
+  ComputeCapabilities,
   EvaluationSpec,
+  ExecutionSpec,
   Job,
   ValidationResult,
 } from './types'
@@ -21,6 +23,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   catalog: () => request<Catalog>('/api/v1/catalog'),
+  compute: () => request<ComputeCapabilities>('/api/v1/compute'),
   validate: (architecture: ArchitectureSpec, window: number, horizon: number) =>
     request<ValidationResult>('/api/v1/architectures/validate', {
       method: 'POST',
@@ -34,10 +37,10 @@ export const api = {
     }),
   jobs: () => request<Job[]>('/api/v1/jobs'),
   legacyRuns: () => request<Record<string, string | number | null>[]>('/api/runs'),
-  submit: (architecture: ArchitectureSpec, evaluation: EvaluationSpec) =>
+  submit: (architecture: ArchitectureSpec, evaluation: EvaluationSpec, execution: ExecutionSpec) =>
     request<Job>('/api/v1/jobs', {
       method: 'POST',
-      body: JSON.stringify({ architecture, evaluation }),
+      body: JSON.stringify({ architecture, evaluation, execution }),
     }),
   cancel: (jobId: string) =>
     request<Job>(`/api/v1/jobs/${jobId}/cancel`, { method: 'POST' }),

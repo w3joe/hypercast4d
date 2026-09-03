@@ -258,8 +258,31 @@ results/playground/
 └── jobs/                 # request, status, logs, runs and summaries
 ```
 
-All training and data access remain local. The server only binds to
-`127.0.0.1` or `localhost`.
+The server only binds to `127.0.0.1` or `localhost`. Local runs keep training
+and data on this machine. A Modal run sends the selected workbook and job
+configuration to your Modal account and copies the standard result artifacts
+back into the local job directory.
+
+### Local or Modal GPU execution
+
+Install the optional Modal integration and authenticate once:
+
+```bash
+uv pip install -e '.[modal]'
+modal setup
+```
+
+Select **Run validation** in the builder, then choose either **Local** or
+**Modal**. Modal jobs can request one of T4, L4, A10, L40S, A100 40 GB,
+A100 80 GB, H100, or H200. L4 is the default. The current training loop uses a
+single GPU; selecting a multi-GPU count would not accelerate it, so the UI does
+not offer one.
+
+Modal runs use the same normalized request, model compiler, data preparation,
+training function, metrics, output CSVs, validation/test separation, and queue
+as local runs. Their job cards include the requested GPU, actual GPU reported
+by PyTorch, logs, cancellation, and a link to the Modal dashboard. GPU usage is
+billed to the authenticated Modal account.
 
 ### Frontend development
 

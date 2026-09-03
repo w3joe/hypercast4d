@@ -61,6 +61,7 @@ def test_job_manager_persists_and_cancels_a_queued_job(tmp_path: Path) -> None:
     manager = JobManager(tmp_path / "results", tmp_path)
     job = manager.submit_validation(_preset("residual-tcn"), {"preset": "quick"})
     assert job["status"]["state"] == "queued"
+    assert job["status"]["execution_target"] == "local"
     cancelled = manager.cancel(job["id"])
     assert cancelled["status"]["state"] == "cancelled"
     recovered = JobManager(tmp_path / "results", tmp_path)
@@ -76,6 +77,22 @@ def test_running_jobs_are_marked_interrupted_on_recovery(tmp_path: Path) -> None
     )
     manager = JobManager(tmp_path / "results", tmp_path)
     assert manager.get_job("job-1")["status"]["state"] == "interrupted"
+
+
+def test_modal_job_records_gpu_and_forces_cuda(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "hypercast4d.playground.modal_capability",
+        lambda: {"sdk_installed": True, "authenticated": True},
+    )
+    manager = JobManager(tmp_path / "results", tmp_path)
+    job = manager.submit_validation(
+        _preset("paper-quaternion"),
+        {"preset": "quick", "device": "cpu"},
+        {"target": "modal", "gpu": "L4"},
+    )
+    assert job["status"]["execution_target"] == "modal"
+    assert job["status"]["gpu"] == "L4"
+    assert job["request"]["evaluation"]["device"] == "cuda"
 
 
 def test_final_test_is_locked_to_one_job_per_candidate(tmp_path: Path) -> None:
@@ -126,6 +143,25 @@ def test_playground_api_exposes_catalog_validation_and_saved_architectures(
         records = client.get("/api/v1/architectures").json()
         assert records[0]["id"] == saved.json()["id"]
         assert client.get("/").status_code == 200
+
+
+def test_compute_api_reports_modal_without_credentials(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "hypercast4d.playground.modal_capability",
+        lambda: {
+            "available": False,
+            "sdk_installed": True,
+            "authenticated": False,
+            "gpus": [{"id": "L4", "label": "L4", "description": "Recommended"}],
+            "setup_command": "modal setup",
+        },
+    )
+    app = create_app(tmp_path / "playground", tmp_path)
+    with TestClient(app) as client:
+        payload = client.get("/api/v1/compute").json()
+        assert payload["local"] == {"available": True}
+        assert payload["modal"]["available"] is False
+        assert "token" not in json.dumps(payload).lower()
 
 
 def test_playground_reads_main_reproduction_results(tmp_path: Path) -> None:

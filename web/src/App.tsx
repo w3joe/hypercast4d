@@ -31,7 +31,9 @@ import {
   ChevronRight,
   CircleStop,
   Clock3,
+  Cloud,
   Copy,
+  Cpu,
   Download,
   FlaskConical,
   GripVertical,
@@ -43,6 +45,7 @@ import {
   Settings2,
   Trash2,
   Upload,
+  ExternalLink,
   X,
   Zap,
 } from 'lucide-react'
@@ -67,6 +70,7 @@ import type {
   Catalog,
   CatalogLayer,
   EvaluationSpec,
+  ExecutionSpec,
   Job,
   LayerParams,
   LayerSpec,
@@ -369,6 +373,91 @@ function EvaluationPanel({
   )
 }
 
+function RunTargetDialog({
+  architecture,
+  evaluation,
+  disabled,
+  onQueued,
+}: {
+  architecture: ArchitectureSpec
+  evaluation: EvaluationSpec
+  disabled: boolean
+  onQueued: (job: Job) => void
+}) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [target, setTarget] = useState<ExecutionSpec['target']>('local')
+  const [gpu, setGpu] = useState('L4')
+  const compute = useQuery({
+    queryKey: ['compute-capabilities'],
+    queryFn: api.compute,
+    enabled: open,
+    staleTime: 10_000,
+  })
+  const mutation = useMutation({
+    mutationFn: (execution: ExecutionSpec) => api.submit(architecture, evaluation, execution),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      onQueued(job)
+      setOpen(false)
+    },
+  })
+  const modal = compute.data?.modal
+  const execution: ExecutionSpec = target === 'modal'
+    ? { target: 'modal', gpu }
+    : { target: 'local', gpu: null }
+  const canSubmit = target === 'local' || Boolean(modal?.available)
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => { setOpen(next); if (next) mutation.reset() }}>
+      <Dialog.Trigger asChild>
+        <button className="primary-button" disabled={disabled}><Play size={15} />Run validation</button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content run-target-dialog">
+          <Dialog.Title>Choose where to run</Dialog.Title>
+          <Dialog.Description>The architecture, dataset protocol, and result format stay identical on either backend.</Dialog.Description>
+          <div className="compute-options" role="radiogroup" aria-label="Execution target">
+            <label className={`compute-option ${target === 'local' ? 'selected' : ''}`}>
+              <input type="radio" name="execution-target" value="local" checked={target === 'local'} onChange={() => setTarget('local')} />
+              <Cpu size={20} />
+              <span><strong>Local</strong><small>Use this machine · {evaluation.device}</small></span>
+              <span className="ready-dot">Ready</span>
+            </label>
+            <label className={`compute-option ${target === 'modal' ? 'selected' : ''}`}>
+              <input type="radio" name="execution-target" value="modal" checked={target === 'modal'} onChange={() => setTarget('modal')} />
+              <Cloud size={20} />
+              <span><strong>Modal</strong><small>Serverless NVIDIA GPU</small></span>
+              <span className={modal?.available ? 'ready-dot' : 'setup-dot'}>{compute.isLoading ? 'Checking…' : modal?.available ? 'Ready' : 'Setup needed'}</span>
+            </label>
+          </div>
+          {target === 'modal' && <div className="gpu-section">
+            <div className="gpu-heading"><span>Select one GPU</span><small>Training currently uses a single GPU</small></div>
+            <div className="gpu-options">
+              {(modal?.gpus ?? [{ id: 'L4', label: 'L4', description: 'Recommended' }]).map((option) => <label className={gpu === option.id ? 'selected' : ''} key={option.id}>
+                <input type="radio" name="modal-gpu" value={option.id} checked={gpu === option.id} onChange={() => setGpu(option.id)} />
+                <strong>{option.label}</strong><small>{option.description}</small>
+              </label>)}
+            </div>
+            {!compute.isLoading && modal && !modal.available && <div className="modal-setup">
+              <strong>{modal.sdk_installed ? 'Authenticate Modal to continue' : 'Install Modal support to continue'}</strong>
+              <code>{modal.setup_command}</code>
+            </div>}
+            <p className="cost-note">Modal GPU execution uses your Modal account and may incur usage charges.</p>
+          </div>}
+          <ErrorNotice error={compute.error || mutation.error} />
+          <div className="dialog-actions">
+            <Dialog.Close asChild><button className="secondary-button">Cancel</button></Dialog.Close>
+            <button className="primary-button" disabled={!canSubmit || compute.isLoading || mutation.isPending} onClick={() => mutation.mutate(execution)}>{target === 'modal' ? <Cloud size={15} /> : <Cpu size={15} />}{mutation.isPending ? 'Queueing…' : target === 'modal' ? `Run on ${gpu}` : 'Run locally'}</button>
+          </div>
+          <Dialog.Close className="dialog-close" aria-label="Close"><X size={17} /></Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
   const queryClient = useQueryClient()
   const initialPreset = catalog.presets.find((preset) => preset.preset_id === 'paper-quaternion') ?? catalog.presets[0]
@@ -377,6 +466,7 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
   const [evaluation, setEvaluation] = useState<EvaluationSpec>(() => evaluationFromPreset(catalog, 'quick'))
   const [savedId, setSavedId] = useState('')
   const [importError, setImportError] = useState<Error | null>(null)
+  const [queuedMessage, setQueuedMessage] = useState('')
   const savedArchitectures = useQuery({ queryKey: ['architectures'], queryFn: api.architectures })
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -392,10 +482,6 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
   const saveMutation = useMutation({
     mutationFn: () => api.saveArchitecture({ ...architecture, id: savedId || undefined }),
     onSuccess: (record) => { setSavedId(record.id); queryClient.invalidateQueries({ queryKey: ['architectures'] }) },
-  })
-  const runMutation = useMutation({
-    mutationFn: () => api.submit(architecture, evaluation),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
   })
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -471,11 +557,11 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
           <label className="secondary-button file-button"><Upload size={15} />Import<input type="file" accept=".yaml,.yml,.json" onChange={(event) => event.target.files?.[0] && importArchitecture(event.target.files[0])} /></label>
           <button className="secondary-button" onClick={exportArchitecture}><Download size={15} />Export</button>
           <button className="secondary-button" disabled={Boolean(architecture.locked) || saveMutation.isPending || !validation.data?.valid} onClick={() => saveMutation.mutate()}><Save size={15} />Save</button>
-          <button className="primary-button" disabled={!validation.data?.valid || runMutation.isPending || !evaluation.cells.length || !evaluation.seeds.length} onClick={() => runMutation.mutate()}><Play size={15} />Run validation</button>
+          <RunTargetDialog architecture={architecture} evaluation={evaluation} disabled={!validation.data?.valid || !evaluation.cells.length || !evaluation.seeds.length} onQueued={(job) => setQueuedMessage(`${job.status.architecture_name} queued ${job.status.execution_target === 'modal' ? `on Modal · ${job.status.gpu}` : 'locally'}.`)} />
         </div>
       </section>
-      <ErrorNotice error={importError || validation.error || saveMutation.error || runMutation.error} />
-      {runMutation.isSuccess && <div className="success-notice"><Check size={15} />Experiment queued. Track it in Runs.</div>}
+      <ErrorNotice error={importError || validation.error || saveMutation.error} />
+      {queuedMessage && <div className="success-notice"><Check size={15} />{queuedMessage} Track it in Runs.</div>}
       <section className="builder-grid">
         <aside className="palette panel-surface">
           <div className="panel-title"><Blocks size={17} /><span>Layer palette</span></div>
@@ -538,7 +624,7 @@ function RunsView({ jobs, legacyRuns }: { jobs: Job[]; legacyRuns: Record<string
           const percent = job.status.total ? Math.round(job.status.completed / job.status.total * 100) : 0
           const active = ['queued', 'starting', 'running'].includes(job.status.state)
           return <article className="job-card panel-surface" key={job.id}>
-            <div className="job-top"><div><span className={statusClass(job.status.state)}>{job.status.state}</span><h3>{job.status.architecture_name}</h3><p>{job.status.phase.replace('_', ' ')} · {job.status.protocol ?? 'chronological-v1'} · {job.status.preset} · {job.id}</p></div><div className="job-actions"><button className="text-button" onClick={() => setLogJob(logJob === job.id ? null : job.id)}>View log</button>{active && <button className="danger-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate(job.id)}><CircleStop size={14} />Cancel</button>}</div></div>
+            <div className="job-top"><div><span className={statusClass(job.status.state)}>{job.status.state}</span><h3>{job.status.architecture_name}</h3><p>{job.status.phase.replace('_', ' ')} · {job.status.protocol ?? 'chronological-v1'} · {job.status.preset} · {job.status.execution_target ?? 'local'}{job.status.gpu ? ` · ${job.status.gpu}` : ''} · {job.id}</p></div><div className="job-actions">{job.status.modal_dashboard_url && <a className="text-button" href={job.status.modal_dashboard_url} target="_blank" rel="noreferrer">Modal <ExternalLink size={13} /></a>}<button className="text-button" onClick={() => setLogJob(logJob === job.id ? null : job.id)}>View log</button>{active && <button className="danger-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate(job.id)}><CircleStop size={14} />Cancel</button>}</div></div>
             <div className="progress-track"><div style={{ width: `${percent}%` }} /></div>
             <div className="job-meta"><span>{job.status.completed} / {job.status.total || '—'} runs</span><span>{percent}%</span>{job.status.current && <span>w{job.status.current.window}/h{job.status.current.horizon} · seed {job.status.current.seed} · epoch {job.status.current.epoch}/{job.status.current.epochs}</span>}<span>Updated {new Date(job.status.updated_at).toLocaleString()}</span></div>
             {job.status.error && <div className="inline-error">{job.status.error}</div>}
@@ -621,7 +707,7 @@ export default function App() {
         {view === 'runs' && <RunsView jobs={jobs.data ?? []} legacyRuns={legacyRuns.data ?? []} />}
         {view === 'compare' && <CompareView jobs={jobs.data ?? []} />}
       </div>
-      <footer className="app-footer"><span>Data and training stay on this machine</span><span><ChevronRight size={13} /> Test metrics remain locked during architecture search</span></footer>
+      <footer className="app-footer"><span>Local by default · data is sent to Modal only when selected</span><span><ChevronRight size={13} /> Test metrics remain locked during architecture search</span></footer>
     </div>
   )
 }

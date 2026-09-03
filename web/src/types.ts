@@ -75,6 +75,22 @@ export type EvaluationSpec = EvaluationDefaults & {
   epochs: number
 }
 
+export type ExecutionSpec = {
+  target: 'local' | 'modal'
+  gpu: string | null
+}
+
+export type ComputeCapabilities = {
+  local: { available: boolean }
+  modal: {
+    available: boolean
+    sdk_installed: boolean
+    authenticated: boolean
+    gpus: { id: string; label: string; description: string }[]
+    setup_command: string
+  }
+}
+
 export type TraceEntry = {
   layer_id: string
   layer_type: string
@@ -117,6 +133,7 @@ export type Job = {
     candidate_hash: string
     architecture: ArchitectureSpec
     evaluation: EvaluationSpec
+    execution: ExecutionSpec
     parent_job_id?: string
   }
   status: {
@@ -130,6 +147,11 @@ export type Job = {
     architecture_name: string
     preset: string
     protocol: 'chronological-v1'
+    execution_target: 'local' | 'modal'
+    gpu?: string | null
+    actual_gpu?: string | null
+    modal_call_id?: string | null
+    modal_dashboard_url?: string | null
     error?: string | null
     current?: {
       window: number

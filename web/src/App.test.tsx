@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -51,6 +51,18 @@ beforeEach(() => {
         restore_best_weights: false,
         device: 'cpu',
       },
+    } : path.includes('compute') ? {
+      local: { available: true },
+      modal: {
+        available: true,
+        sdk_installed: true,
+        authenticated: true,
+        gpus: [
+          { id: 'T4', label: 'T4', description: 'Economy' },
+          { id: 'L4', label: 'L4', description: 'Recommended' },
+        ],
+        setup_command: 'modal setup',
+      },
     } : path.includes('validate') ? {
       valid: true,
       spec: paperPreset,
@@ -73,5 +85,15 @@ describe('architecture playground', () => {
     expect(screen.getByText('Main run protocol')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /clone to edit/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /run validation/i })).toBeInTheDocument()
+  })
+
+  it('offers local and Modal execution with GPU selection', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /run validation/i }))
+    expect(await screen.findByRole('heading', { name: /choose where to run/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /modal/i }))
+    expect(await screen.findByRole('radio', { name: /l4/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run on l4/i })).toBeEnabled()
   })
 })
