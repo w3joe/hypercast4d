@@ -209,56 +209,70 @@ still produce different floating-point scores. The supplement does not include
 the code that generated its separate reordered-input `HNNOrder` results, so the
 configuration includes only the input order whose executable code was released.
 
-## Live results dashboard
+## Architecture playground and live results
 
-HyperCast4D includes a local browser dashboard with no extra web-framework
-dependency. To view the configured full-run output, run:
+HyperCast4D includes a local visual workbench for composing neural networks,
+running validation experiments, and comparing MAE/MSE against persistence. Run:
 
 ```bash
-hypercast4d-dashboard
+hypercast4d-playground
 ```
 
-It opens `http://127.0.0.1:8765` and displays:
+It opens `http://127.0.0.1:8765`. The existing `hypercast4d-dashboard`
+command is retained as an alias. The workbench provides:
 
-- experiment progress;
-- the number of completed models and forecasting cells;
-- a live grouped MAE graph;
-- the latest completed runs and their timing;
-- the best mean MAE observed so far.
+- a drag-and-drop sequential architecture builder with live tensor shapes;
+- paper CNN, LSTM, Quaternion, Coquaternion, and `Cl(1,1)` presets;
+- causal CNN, residual TCN, GRU, LSTM, HyperDense, pooling, normalization,
+  activation, dropout, and dense blocks;
+- direct, persistence-residual, and cumulative-residual forecast heads;
+- a persistent one-at-a-time training queue with progress and cancellation;
+- validation MAE/MSE, per-lead errors, persistence-relative scores, and
+  parameter-efficiency comparisons.
 
-To watch a new full evaluation live, use two terminals.
+The Quick preset is a pipeline smoke test. Standard evaluates the three
+configured forecasting cells over five seeds. Robust evaluates all sixteen
+paper window/horizon combinations over five seeds and three chronological
+validation folds.
+
+The playground ranks architecture candidates using validation data. Quick
+runs cannot unlock the test set. A completed Standard or Robust candidate can
+be sent to the held-out test set once through the explicit **Final test**
+action. This is designed to prevent repeatedly tuning against test results.
+
+Architectures can be saved locally or exported as YAML. Playground state is
+written beneath `results/playground/`:
+
+```text
+results/playground/
+├── architectures/       # named architecture specifications
+└── jobs/                 # request, status, logs, runs and summaries
+```
+
+All training and data access remain local. The server only binds to
+`127.0.0.1` or `localhost`.
+
+### Frontend development
+
+The packaged Python command serves the committed production frontend. To work
+on the React frontend with hot reload, use two terminals.
 
 Terminal 1:
 
 ```bash
-cd hypercast4d
-source .venv/bin/activate
-hypercast4d-dashboard
+hypercast4d-playground --no-browser
 ```
 
 Terminal 2:
 
 ```bash
-cd hypercast4d
-source .venv/bin/activate
-hypercast4d-run
+cd web
+npm install
+npm run dev
 ```
 
-The runner writes `runs.csv` and `status.json` atomically after every completed
-model. The dashboard polls those files every 1.5 seconds by default, so bars
-and progress appear while training continues.
-
-To watch a quick evaluation instead:
-
-```bash
-hypercast4d-dashboard --results results/evaluation_quick
-```
-
-Then run `hypercast4d-run --quick` in the second terminal. Use `Ctrl-C` to stop
-the dashboard server. Pass `--no-browser` if you do not want it to open a tab
-automatically, choose another port with `--port 9000`, or change the polling
-interval with `--refresh-seconds 3`. The server binds to `127.0.0.1` by default,
-and no experiment data is uploaded anywhere.
+Open `http://127.0.0.1:5173`. Run `npm test` for frontend tests and
+`npm run build` to refresh the packaged assets.
 
 To show the released-notebook reproduction results, including the quick run:
 
@@ -592,11 +606,15 @@ hypercast4d/
 │   ├── layers.py                 # HyperDense implementation
 │   ├── data.py                   # Leakage-safe data preparation
 │   ├── models.py                 # Seven forecasting models
+│   ├── architecture.py           # Composable model schema and compiler
 │   ├── training.py               # Training and metrics
 │   ├── experiment.py             # Evaluation CLI and result generation
 │   ├── reproduction.py           # Complete released-notebook grid-search CLI
-│   ├── dashboard.py              # Auto-refreshing local results dashboard
+│   ├── playground.py             # Local API, queue and static app server
+│   ├── playground_runner.py      # Isolated validation/test worker
+│   ├── dashboard.py              # Legacy dashboard API compatibility
 │   └── download.py               # Supplement downloader and verification
+├── web/                          # React/TypeScript playground source
 ├── tests/                        # Algebra, gradient, data, and model tests
 ├── data/                         # Ignored downloaded material
 └── results/                      # Ignored generated results

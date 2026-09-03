@@ -1,0 +1,135 @@
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from fastapi.testclient import TestClient
+
+from hypercast4d.architecture import presets
+from hypercast4d.playground import JobManager, create_app
+from hypercast4d.playground_runner import normalize_evaluation, run_job
+
+
+def _preset(preset_id: str) -> dict:
+    return next(item for item in presets() if item["preset_id"] == preset_id)
+
+
+def test_evaluation_presets_normalize_with_safe_defaults() -> None:
+    quick = normalize_evaluation({"preset": "quick"})
+    assert quick["cells"] == [{"window": 10, "horizon": 1}]
+    assert quick["seeds"] == [7]
+    assert quick["data_path"] == "data/raw/paper_data.xlsx"
+
+
+def test_evaluation_rejects_paths_outside_data() -> None:
+    try:
+        normalize_evaluation({"data_path": "../private.xlsx"})
+    except ValueError as error:
+        assert "relative path" in str(error)
+    else:
+        raise AssertionError("unsafe path was accepted")
+
+
+def test_job_manager_persists_and_cancels_a_queued_job(tmp_path: Path) -> None:
+    manager = JobManager(tmp_path / "results", tmp_path)
+    job = manager.submit_validation(_preset("residual-tcn"), {"preset": "quick"})
+    assert job["status"]["state"] == "queued"
+    cancelled = manager.cancel(job["id"])
+    assert cancelled["status"]["state"] == "cancelled"
+    recovered = JobManager(tmp_path / "results", tmp_path)
+    assert recovered.get_job(job["id"])["status"]["state"] == "cancelled"
+
+
+def test_running_jobs_are_marked_interrupted_on_recovery(tmp_path: Path) -> None:
+    job_dir = tmp_path / "results" / "jobs" / "job-1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "request.json").write_text("{}", encoding="utf-8")
+    (job_dir / "status.json").write_text(
+        json.dumps({"state": "running"}), encoding="utf-8"
+    )
+    manager = JobManager(tmp_path / "results", tmp_path)
+    assert manager.get_job("job-1")["status"]["state"] == "interrupted"
+
+
+def test_final_test_is_locked_to_one_job_per_candidate(tmp_path: Path) -> None:
+    manager = JobManager(tmp_path / "results", tmp_path)
+    parent = manager.submit_validation(
+        _preset("residual-tcn"),
+        {
+            "preset": "standard",
+            "cells": [{"window": 10, "horizon": 1}],
+            "seeds": [7],
+            "epochs": 1,
+        },
+    )
+    status_path = manager.jobs_root / parent["id"] / "status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["state"] = "complete"
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+
+    final_job = manager.submit_final_test(parent["id"])
+    assert final_job["status"]["phase"] == "final_test"
+    try:
+        manager.submit_final_test(parent["id"])
+    except ValueError as error:
+        assert "already has" in str(error)
+    else:
+        raise AssertionError("duplicate final test was accepted")
+
+
+def test_playground_api_exposes_catalog_validation_and_saved_architectures(
+    tmp_path: Path,
+) -> None:
+    app = create_app(tmp_path / "playground", tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/health").json() == {"ok": True}
+        catalog = client.get("/api/v1/catalog")
+        assert catalog.status_code == 200
+        assert any(item["type"] == "tcn" for group in catalog.json()["categories"] for item in group["layers"])
+
+        response = client.post(
+            "/api/v1/architectures/validate",
+            json={"architecture": _preset("residual-tcn"), "window": 20, "horizon": 5},
+        )
+        assert response.status_code == 200
+        assert response.json()["output_shape"] == "[B, 5]"
+
+        saved = client.post("/api/v1/architectures", json=_preset("residual-tcn"))
+        assert saved.status_code == 200
+        records = client.get("/api/v1/architectures").json()
+        assert records[0]["id"] == saved.json()["id"]
+        assert client.get("/").status_code == 200
+
+
+def test_worker_completes_a_real_validation_job(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_directory = tmp_path / "data" / "raw"
+    data_directory.mkdir(parents=True)
+    rng = np.random.default_rng(7)
+    changes = rng.normal(0.01, 0.05, size=(140, 4))
+    values = 10 + np.cumsum(changes, axis=0)
+    frame = pd.DataFrame(values, columns=["Copper", "FCX", "CLP", "SCCO"])
+    frame.insert(0, "Date", pd.date_range("2020-01-01", periods=len(frame)))
+    frame.to_excel(data_directory / "paper_data.xlsx", index=False)
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    request = {
+        "phase": "validation",
+        "architecture": _preset("residual-tcn"),
+        "evaluation": {
+            "preset": "quick",
+            "data_path": "data/raw/paper_data.xlsx",
+            "epochs": 1,
+        },
+    }
+    (job_dir / "request.json").write_text(json.dumps(request), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    run_job(job_dir)
+
+    status = json.loads((job_dir / "status.json").read_text(encoding="utf-8"))
+    assert status["state"] == "complete"
+    runs = pd.read_csv(job_dir / "runs.csv")
+    assert list(runs["split"]) == ["validation"]
+    assert np.isfinite(runs.loc[0, "mae_ratio"])

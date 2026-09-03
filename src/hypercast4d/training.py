@@ -82,8 +82,10 @@ def fit_model(
         criterion: nn.Module = nn.MSELoss()
     elif loss_name == "mae":
         criterion = nn.L1Loss()
+    elif loss_name == "huber":
+        criterion = nn.HuberLoss()
     else:
-        raise ValueError("loss must be 'mse' or 'mae'")
+        raise ValueError("loss must be 'mse', 'mae', or 'huber'")
     best_loss = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
     stale_epochs = 0

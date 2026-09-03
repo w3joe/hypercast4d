@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hypercast4d"
-version = "0.1.0"
+version = "0.2.0"
 description = "Clean-room evaluation of 4D hypercomplex time-series forecasting"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [{name = "HyperCast4D contributors"}]
 dependencies = [
+  "fastapi>=0.115",
   "matplotlib>=3.8",
   "numpy>=1.26",
   "openpyxl>=3.1",
@@ -19,19 +20,24 @@ dependencies = [
   "scikit-learn>=1.3",
   "tensorboard>=2.16,<2.21",
   "torch>=2.2",
+  "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["httpx2>=2.0", "pytest>=8.0"]
 
 [project.scripts]
 hypercast4d-dashboard = "hypercast4d.dashboard:main"
 hypercast4d-download = "hypercast4d.download:main"
+hypercast4d-playground = "hypercast4d.playground:main"
 hypercast4d-run = "hypercast4d.experiment:main"
 hypercast4d-reproduce = "hypercast4d.reproduction:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+hypercast4d = ["web_dist/**"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

@@ -1,13 +1,11 @@
-"""Serve a dependency-free dashboard for live HyperCast4D results."""
+"""Legacy result readers plus the unified HyperCast4D playground entry point."""
 
 from __future__ import annotations
 
-import argparse
 import csv
 import json
 import math
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -407,31 +405,11 @@ def handler_for(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--results", type=Path, default=Path("results/evaluation"))
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--refresh-seconds", type=float, default=1.5)
-    parser.add_argument("--no-browser", action="store_true")
-    args = parser.parse_args()
-    if args.refresh_seconds <= 0:
-        parser.error("--refresh-seconds must be positive")
+    # Keep the historical helper functions in this module for API compatibility,
+    # while the command now opens the unified builder, runs, and comparison app.
+    from .playground import main as playground_main
 
-    server = ThreadingHTTPServer(
-        (args.host, args.port), handler_for(args.results, args.refresh_seconds)
-    )
-    url = f"http://{args.host}:{args.port}"
-    print(f"HyperCast4D dashboard: {url}")
-    print(f"Watching results in: {args.results.resolve()}")
-    print("Press Ctrl-C to stop.")
-    if not args.no_browser:
-        webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nDashboard stopped.")
-    finally:
-        server.server_close()
+    playground_main()
 
 
 if __name__ == "__main__":
