@@ -166,6 +166,22 @@ The complete command is:
 hypercast4d-reproduce
 ```
 
+For a representative subset calibrated to roughly 20 minutes on an Apple M4
+Pro, run:
+
+```bash
+hypercast4d-reproduce --config configs/paper_reproduction_20min.yaml
+```
+
+This preset retains the paper's 50 epochs and 10-fold CV for w10/h1, but samples
+68 configurations from the published search spaces for 680 total fits. Runtime
+depends on hardware and competing workloads. Its results are written to
+`results/paper_reproduction_20min/` and can be watched with:
+
+```bash
+hypercast4d-dashboard --results results/paper_reproduction_20min
+```
+
 The committed search contains 160 CNN, 160 LSTM, and 576 hypercomplex
 candidates. Across 16 window/horizon cells and 10 folds, that is 143,360 model
 fits of 50 epochs each. It can take many hours or days on one CPU. Progress is

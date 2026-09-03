@@ -24,6 +24,12 @@ def reproduction_config() -> dict:
     )
 
 
+def timed_subset_config() -> dict:
+    return yaml.safe_load(
+        (ROOT / "configs" / "paper_reproduction_20min.yaml").read_text(encoding="utf-8")
+    )
+
+
 def test_complete_search_spaces_match_supplementary_notebook() -> None:
     grids = candidate_grids(reproduction_config()["search_spaces"])
     assert len(grids["cnn"]) == 160
@@ -52,6 +58,26 @@ def test_complete_search_spaces_match_supplementary_notebook() -> None:
         "units": 16,
         "dense_units": 32,
     }
+
+
+def test_timed_subset_is_680_fits_and_stays_in_full_grid() -> None:
+    complete = candidate_grids(reproduction_config()["search_spaces"])
+    subset_config = timed_subset_config()
+    subset = candidate_grids(subset_config["search_spaces"])
+    assert {model: len(grid) for model, grid in subset.items()} == {
+        "cnn": 16,
+        "lstm": 16,
+        "hyper": 36,
+    }
+    assert (
+        sum(map(len, subset.values())) * subset_config["cross_validation"]["folds"]
+        == 680
+    )
+    for model in subset:
+        assert all(candidate in complete[model] for candidate in subset[model])
+    assert subset_config["training"]["epochs"] == 50
+    assert subset_config["data"]["windows"] == [10]
+    assert subset_config["data"]["horizons"] == [1]
 
 
 def test_global_scaling_uses_named_target_column() -> None:
