@@ -33,7 +33,6 @@ import {
   Clock3,
   Cloud,
   Copy,
-  Cpu,
   Download,
   FlaskConical,
   GripVertical,
@@ -373,7 +372,7 @@ function EvaluationPanel({
   )
 }
 
-function RunTargetDialog({
+function RunControls({
   architecture,
   evaluation,
   disabled,
@@ -385,13 +384,12 @@ function RunTargetDialog({
   onQueued: (job: Job) => void
 }) {
   const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
   const [target, setTarget] = useState<ExecutionSpec['target']>('local')
   const [gpu, setGpu] = useState('L4')
   const compute = useQuery({
     queryKey: ['compute-capabilities'],
     queryFn: api.compute,
-    enabled: open,
+    enabled: target === 'modal',
     staleTime: 10_000,
   })
   const mutation = useMutation({
@@ -399,7 +397,6 @@ function RunTargetDialog({
     onSuccess: (job) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       onQueued(job)
-      setOpen(false)
     },
   })
   const modal = compute.data?.modal
@@ -409,52 +406,47 @@ function RunTargetDialog({
   const canSubmit = target === 'local' || Boolean(modal?.available)
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { setOpen(next); if (next) mutation.reset() }}>
-      <Dialog.Trigger asChild>
-        <button className="primary-button" disabled={disabled}><Play size={15} />Run validation</button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content run-target-dialog">
-          <Dialog.Title>Choose where to run</Dialog.Title>
-          <Dialog.Description>The architecture, dataset protocol, and result format stay identical on either backend.</Dialog.Description>
-          <div className="compute-options" role="radiogroup" aria-label="Execution target">
-            <label className={`compute-option ${target === 'local' ? 'selected' : ''}`}>
-              <input type="radio" name="execution-target" value="local" checked={target === 'local'} onChange={() => setTarget('local')} />
-              <Cpu size={20} />
-              <span><strong>Local</strong><small>Use this machine · {evaluation.device}</small></span>
-              <span className="ready-dot">Ready</span>
-            </label>
-            <label className={`compute-option ${target === 'modal' ? 'selected' : ''}`}>
-              <input type="radio" name="execution-target" value="modal" checked={target === 'modal'} onChange={() => setTarget('modal')} />
-              <Cloud size={20} />
-              <span><strong>Modal</strong><small>Serverless NVIDIA GPU</small></span>
-              <span className={modal?.available ? 'ready-dot' : 'setup-dot'}>{compute.isLoading ? 'Checking…' : modal?.available ? 'Ready' : 'Setup needed'}</span>
-            </label>
-          </div>
-          {target === 'modal' && <div className="gpu-section">
-            <div className="gpu-heading"><span>Select one GPU</span><small>Training currently uses a single GPU</small></div>
-            <div className="gpu-options">
-              {(modal?.gpus ?? [{ id: 'L4', label: 'L4', description: 'Recommended' }]).map((option) => <label className={gpu === option.id ? 'selected' : ''} key={option.id}>
-                <input type="radio" name="modal-gpu" value={option.id} checked={gpu === option.id} onChange={() => setGpu(option.id)} />
-                <strong>{option.label}</strong><small>{option.description}</small>
-              </label>)}
-            </div>
-            {!compute.isLoading && modal && !modal.available && <div className="modal-setup">
-              <strong>{modal.sdk_installed ? 'Authenticate Modal to continue' : 'Install Modal support to continue'}</strong>
-              <code>{modal.setup_command}</code>
-            </div>}
-            <p className="cost-note">Modal GPU execution uses your Modal account and may incur usage charges.</p>
-          </div>}
-          <ErrorNotice error={compute.error || mutation.error} />
-          <div className="dialog-actions">
-            <Dialog.Close asChild><button className="secondary-button">Cancel</button></Dialog.Close>
-            <button className="primary-button" disabled={!canSubmit || compute.isLoading || mutation.isPending} onClick={() => mutation.mutate(execution)}>{target === 'modal' ? <Cloud size={15} /> : <Cpu size={15} />}{mutation.isPending ? 'Queueing…' : target === 'modal' ? `Run on ${gpu}` : 'Run locally'}</button>
-          </div>
-          <Dialog.Close className="dialog-close" aria-label="Close"><X size={17} /></Dialog.Close>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <div className="run-control-stack">
+      <div className="run-controls" aria-label="Validation execution">
+        <label className="run-select">
+          <span>Run on</span>
+          <select
+            aria-label="Run method"
+            value={target}
+            onChange={(event) => { setTarget(event.target.value as ExecutionSpec['target']); mutation.reset() }}
+          >
+            <option value="local">Local · {evaluation.device}</option>
+            <option value="modal">Modal · GPU</option>
+          </select>
+        </label>
+        {target === 'modal' && <label className="run-select gpu-select">
+          <span>GPU</span>
+          <select aria-label="Modal GPU" value={gpu} onChange={(event) => setGpu(event.target.value)}>
+            {(modal?.gpus ?? [{ id: 'L4', label: 'L4', description: 'Recommended' }]).map((option) => (
+              <option value={option.id} key={option.id}>{option.label} · {option.description}</option>
+            ))}
+          </select>
+        </label>}
+        <button
+          className="primary-button"
+          disabled={disabled || !canSubmit || compute.isLoading || mutation.isPending}
+          onClick={() => mutation.mutate(execution)}
+        >
+          {target === 'modal' ? <Cloud size={15} /> : <Play size={15} />}
+          {mutation.isPending ? 'Queueing…' : 'Run validation'}
+        </button>
+      </div>
+      {target === 'modal' && <div className={`run-status ${modal?.available ? 'ready' : ''}`} role="status">
+        {compute.isLoading
+          ? 'Checking Modal…'
+          : modal?.available
+            ? `${gpu} ready on Modal · usage charges may apply`
+            : modal
+              ? <>{modal.sdk_installed ? 'Authenticate Modal:' : 'Install Modal support:'} <code>{modal.setup_command}</code></>
+              : 'Modal availability could not be checked.'}
+      </div>}
+      <ErrorNotice error={compute.error || mutation.error} />
+    </div>
   )
 }
 
@@ -557,7 +549,7 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
           <label className="secondary-button file-button"><Upload size={15} />Import<input type="file" accept=".yaml,.yml,.json" onChange={(event) => event.target.files?.[0] && importArchitecture(event.target.files[0])} /></label>
           <button className="secondary-button" onClick={exportArchitecture}><Download size={15} />Export</button>
           <button className="secondary-button" disabled={Boolean(architecture.locked) || saveMutation.isPending || !validation.data?.valid} onClick={() => saveMutation.mutate()}><Save size={15} />Save</button>
-          <RunTargetDialog architecture={architecture} evaluation={evaluation} disabled={!validation.data?.valid || !evaluation.cells.length || !evaluation.seeds.length} onQueued={(job) => setQueuedMessage(`${job.status.architecture_name} queued ${job.status.execution_target === 'modal' ? `on Modal · ${job.status.gpu}` : 'locally'}.`)} />
+          <RunControls architecture={architecture} evaluation={evaluation} disabled={!validation.data?.valid || !evaluation.cells.length || !evaluation.seeds.length} onQueued={(job) => setQueuedMessage(`${job.status.architecture_name} queued ${job.status.execution_target === 'modal' ? `on Modal · ${job.status.gpu}` : 'locally'}.`)} />
         </div>
       </section>
       <ErrorNotice error={importError || validation.error || saveMutation.error} />
