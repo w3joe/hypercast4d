@@ -244,6 +244,17 @@ automatically, choose another port with `--port 9000`, or change the polling
 interval with `--refresh-seconds 3`. The server binds to `127.0.0.1` by default,
 and no experiment data is uploaded anywhere.
 
+To show the released-notebook reproduction results, including the quick run:
+
+```bash
+hypercast4d-dashboard --results results/paper_reproduction_quick
+```
+
+For reproduction outputs, the graph shows the lowest normalized
+cross-validation MAE among the candidates completed so far. The table identifies
+the candidate number and MAE standard deviation rather than an evaluation seed
+and test MSE.
+
 ## TensorBoard training diagnostics
 
 TensorBoard logging is enabled in the default configuration. Every invocation

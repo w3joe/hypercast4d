@@ -1,7 +1,13 @@
 import json
 from pathlib import Path
 
-from hypercast4d.dashboard import DASHBOARD_HTML, handler_for, load_runs, load_status
+from hypercast4d.dashboard import (
+    DASHBOARD_HTML,
+    handler_for,
+    load_reproduction_candidates,
+    load_runs,
+    load_status,
+)
 
 
 def test_load_runs_coerces_numeric_fields(tmp_path: Path) -> None:
@@ -38,6 +44,25 @@ def test_status_falls_back_to_existing_results(tmp_path: Path) -> None:
         "completed": 4,
         "total": 4,
     }
+
+
+def test_load_reproduction_candidates_selects_current_best(tmp_path: Path) -> None:
+    (tmp_path / "candidates.csv").write_text(
+        "input_order,window,horizon,model,candidate,mae_mean_scaled,"
+        "mae_std_scaled,parameters,train_seconds_mean,declared_algebra,"
+        "effective_algebra,settings_json\n"
+        'published,10,1,cnn,0,0.08,0.01,145,1.2,,,"{}"\n'
+        'published,10,1,cnn,1,0.06,0.02,145,1.3,,,"{}"\n'
+        'published,10,1,hyper,0,0.20,0.03,29,0.8,quaternion,quaternion,"{}"\n',
+        encoding="utf-8",
+    )
+    rows = load_reproduction_candidates(tmp_path)
+    assert len(rows) == 2
+    cnn = next(row for row in rows if row["model"] == "cnn")
+    assert cnn["candidate"] == 1
+    assert cnn["mae"] == 0.06
+    assert cnn["mae_std"] == 0.02
+    assert load_runs(tmp_path) == rows
 
 
 def test_status_file_takes_precedence(tmp_path: Path) -> None:

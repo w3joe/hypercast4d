@@ -28,6 +28,16 @@ NUMERIC_FIELDS = {
     "test_samples": int,
 }
 
+REPRODUCTION_NUMERIC_FIELDS = {
+    "window": int,
+    "horizon": int,
+    "candidate": int,
+    "mae_mean_scaled": float,
+    "mae_std_scaled": float,
+    "parameters": int,
+    "train_seconds_mean": float,
+}
+
 
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="en">
@@ -99,7 +109,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   <header>
     <div>
       <h1>HyperCast<span>4D</span></h1>
-      <p class="subtitle">Live leakage-safe forecasting results. The page reads the experiment's CSV output and refreshes automatically.</p>
+      <p id="subtitle" class="subtitle">Live leakage-safe forecasting results. The page reads the experiment's CSV output and refreshes automatically.</p>
     </div>
     <div id="status-badge" class="badge">Waiting for results</div>
   </header>
@@ -119,14 +129,14 @@ DASHBOARD_HTML = r"""<!doctype html>
       <div id="model-value" class="value">0</div>
     </article>
     <article class="card">
-      <div class="label">Best mean MAE</div>
+      <div id="best-label" class="label">Best mean MAE</div>
       <div id="best-value" class="value">—</div>
     </article>
   </section>
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Mean test MAE by model</h2>
+      <h2 id="chart-title">Mean test MAE by model</h2>
       <span class="note">Lower is better · updates every __REFRESH_SECONDS__ seconds</span>
     </div>
     <svg id="chart" viewBox="0 0 1000 420" role="img" aria-label="Live mean absolute error chart"></svg>
@@ -135,12 +145,12 @@ DASHBOARD_HTML = r"""<!doctype html>
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Latest completed runs</h2>
+      <h2 id="table-title">Latest completed runs</h2>
       <span id="updated" class="note">Not updated yet</span>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Model</th><th>Window</th><th>Horizon</th><th>Seed</th><th>MAE</th><th>MSE</th><th>Parameters</th><th>Seconds</th></tr></thead>
+        <thead><tr><th>Model</th><th>Window</th><th>Horizon</th><th id="run-column">Seed</th><th>MAE</th><th id="error-column">MSE</th><th>Parameters</th><th>Seconds</th></tr></thead>
         <tbody id="runs-body"></tbody>
       </table>
     </div>
@@ -148,10 +158,10 @@ DASHBOARD_HTML = r"""<!doctype html>
   <footer>Served locally by HyperCast4D · no experiment data leaves this machine</footer>
 </main>
 <script>
-const order = ['persistence','linear','cnn','lstm','hyper_quaternion','hyper_coquaternion','hyper_cl11'];
+const order = ['persistence','linear','cnn','lstm','hyper','hyper_quaternion','hyper_coquaternion','hyper_cl11'];
 const colors = {
   persistence:'#4cc9f0', linear:'#f7b267', cnn:'#ff6b6b', lstm:'#c77dff',
-  hyper_quaternion:'#47d7ac', hyper_coquaternion:'#80ed99', hyper_cl11:'#ffd166'
+  hyper:'#47d7ac', hyper_quaternion:'#47d7ac', hyper_coquaternion:'#80ed99', hyper_cl11:'#ffd166'
 };
 const fallbackColors = ['#90dbf4','#f1c0e8','#cfbaf0','#a3c4f3','#fde4cf'];
 function colorFor(model) {
@@ -213,11 +223,13 @@ function drawChart(rows) {
   const legend=document.getElementById('legend'); legend.replaceChildren();
   models.forEach(model=>{const item=document.createElement('span');item.style.setProperty('--color',colorFor(model));item.textContent=model;legend.appendChild(item);});
 }
-function renderTable(rows) {
+function renderTable(rows, reproduction) {
   const body=document.getElementById('runs-body'); body.replaceChildren();
   rows.slice(-12).reverse().forEach(row=>{
     const tr=document.createElement('tr');
-    [row.model,row.window,row.horizon,row.seed,row.mae.toFixed(5),row.mse.toFixed(5),row.parameters,row.train_seconds.toFixed(3)].forEach((value,index)=>{
+    const runValue=reproduction?row.candidate:row.seed;
+    const errorValue=reproduction?row.mae_std:row.mse;
+    [row.model,row.window,row.horizon,runValue,row.mae.toFixed(5),errorValue.toFixed(5),row.parameters,row.train_seconds.toFixed(3)].forEach((value,index)=>{
       const td=document.createElement('td'); td.textContent=value; if(index>0)td.className='number'; tr.appendChild(td);
     }); body.appendChild(tr);
   });
@@ -226,7 +238,17 @@ async function poll() {
   try {
     const [statusResponse,runsResponse]=await Promise.all([fetch('/api/status',{cache:'no-store'}),fetch('/api/runs',{cache:'no-store'})]);
     const status=await statusResponse.json(), rows=await runsResponse.json();
-    const completed=status.completed ?? rows.length, total=status.total ?? rows.length;
+    const reproduction=rows.some(row=>row.candidate!==undefined&&row.candidate!==null);
+    const completed=status.completed ?? status.completed_fits ?? rows.length;
+    const total=status.total ?? status.total_fits ?? rows.length;
+    document.getElementById('subtitle').textContent=reproduction
+      ? 'Released-notebook reproduction results. Values are normalized cross-validation MAE and refresh automatically.'
+      : "Live leakage-safe forecasting results. The page reads the experiment's CSV output and refreshes automatically.";
+    document.getElementById('best-label').textContent=reproduction?'Best normalized MAE':'Best mean MAE';
+    document.getElementById('chart-title').textContent=reproduction?'Best normalized CV MAE by model':'Mean test MAE by model';
+    document.getElementById('table-title').textContent=reproduction?'Current best candidates':'Latest completed runs';
+    document.getElementById('run-column').textContent=reproduction?'Candidate':'Seed';
+    document.getElementById('error-column').textContent=reproduction?'MAE std':'MSE';
     document.getElementById('progress-value').textContent=`${completed} / ${total}`;
     document.getElementById('progress-bar').style.width=`${total?Math.min(100,completed/total*100):0}%`;
     const cells=new Set(rows.map(row=>`${row.window}/${row.horizon}`));
@@ -239,7 +261,7 @@ async function poll() {
     badge.textContent=status.state==='running'?'Experiment running':status.state==='complete'?'Experiment complete':'Waiting for experiment';
     badge.className=`badge ${status.state||''}`;
     document.getElementById('updated').textContent=`Updated ${new Date().toLocaleTimeString()}`;
-    drawChart(rows); renderTable(rows);
+    drawChart(rows); renderTable(rows,reproduction);
   } catch (error) {
     document.getElementById('status-badge').textContent='Waiting for result files';
   }
@@ -255,7 +277,7 @@ def load_runs(results_directory: Path) -> list[dict[str, object]]:
     """Load live CSV rows and coerce known numeric fields for JSON clients."""
     path = results_directory / "runs.csv"
     if not path.exists() or path.stat().st_size == 0:
-        return []
+        return load_reproduction_candidates(results_directory)
     rows: list[dict[str, object]] = []
     with path.open(newline="", encoding="utf-8") as handle:
         for raw in csv.DictReader(handle):
@@ -276,6 +298,54 @@ def load_runs(results_directory: Path) -> list[dict[str, object]]:
                     row[field] = None
             rows.append(row)
     return rows
+
+
+def load_reproduction_candidates(
+    results_directory: Path,
+) -> list[dict[str, object]]:
+    """Load the best completed reproduction candidate for each model and cell."""
+    path = results_directory / "candidates.csv"
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    best: dict[tuple[str, int, int, str], dict[str, object]] = {}
+    with path.open(newline="", encoding="utf-8") as handle:
+        for raw in csv.DictReader(handle):
+            converted: dict[str, int | float] = {}
+            try:
+                for field, converter in REPRODUCTION_NUMERIC_FIELDS.items():
+                    value = converter(raw[field])
+                    if isinstance(value, float) and not math.isfinite(value):
+                        raise ValueError(f"Non-finite {field}")
+                    converted[field] = value
+            except (KeyError, TypeError, ValueError):
+                continue
+            model = raw.get("model", "")
+            if not model:
+                continue
+            row: dict[str, object] = {
+                "input_order": raw.get("input_order", ""),
+                "window": converted["window"],
+                "horizon": converted["horizon"],
+                "model": model,
+                "candidate": converted["candidate"],
+                "mae": converted["mae_mean_scaled"],
+                "mae_std": converted["mae_std_scaled"],
+                "mse": None,
+                "parameters": converted["parameters"],
+                "train_seconds": converted["train_seconds_mean"],
+                "declared_algebra": raw.get("declared_algebra") or None,
+                "effective_algebra": raw.get("effective_algebra") or None,
+                "settings_json": raw.get("settings_json", ""),
+            }
+            key = (
+                str(row["input_order"]),
+                int(row["window"]),
+                int(row["horizon"]),
+                str(row["model"]),
+            )
+            if key not in best or float(row["mae"]) < float(best[key]["mae"]):
+                best[key] = row
+    return list(best.values())
 
 
 def load_status(results_directory: Path, row_count: int) -> dict[str, object]:
