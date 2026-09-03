@@ -24,7 +24,9 @@ class FitResult:
     process_peak_rss_mb: float
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int | None) -> None:
+    if seed is None:
+        return
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -43,7 +45,7 @@ def fit_model(
     train_data: TensorDataset,
     validation_data: TensorDataset,
     *,
-    seed: int,
+    seed: int | None,
     epochs: int,
     batch_size: int,
     learning_rate: float,
@@ -61,7 +63,7 @@ def fit_model(
 ) -> FitResult:
     seed_everything(seed)
     model.to(device)
-    generator = torch.Generator().manual_seed(seed)
+    generator = torch.Generator().manual_seed(seed) if seed is not None else None
     train_loader = DataLoader(
         train_data,
         batch_size=batch_size,

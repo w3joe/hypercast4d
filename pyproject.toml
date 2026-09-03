@@ -16,6 +16,7 @@ dependencies = [
   "openpyxl>=3.1",
   "pandas>=2.1",
   "PyYAML>=6.0",
+  "scikit-learn>=1.3",
   "tensorboard>=2.16,<2.21",
   "torch>=2.2",
 ]
@@ -27,6 +28,7 @@ dev = ["pytest>=8.0"]
 hypercast4d-dashboard = "hypercast4d.dashboard:main"
 hypercast4d-download = "hypercast4d.download:main"
 hypercast4d-run = "hypercast4d.experiment:main"
+hypercast4d-reproduce = "hypercast4d.reproduction:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

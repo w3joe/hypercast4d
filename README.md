@@ -37,6 +37,16 @@ hypercast4d-run
 The complete evaluation runs seven models on three forecasting configurations
 with five random seeds, producing 105 result rows. Runtime varies by computer.
 
+To run the separate archived-notebook reproduction smoke test:
+
+```bash
+hypercast4d-reproduce --quick
+```
+
+See [Exact released-notebook reproduction](#exact-released-notebook-reproduction)
+before starting the complete grid search, which requires 143,360 cross-validation
+fits.
+
 When you are finished, leave the environment with:
 
 ```bash
@@ -122,6 +132,66 @@ This is equivalent to:
 ```bash
 hypercast4d-run --config configs/evaluation.yaml
 ```
+
+## Exact released-notebook reproduction
+
+The repository has two intentionally separate experiment paths:
+
+- `hypercast4d-run` is the practical, leakage-safe evaluation described above.
+- `hypercast4d-reproduce` copies the statistical protocol and complete search
+  space in the paper's released `AnalysisGoogle.ipynb`, including its known
+  methodological issues.
+
+All reproduction choices are declared in
+[configs/paper_reproduction.yaml](configs/paper_reproduction.yaml): input order,
+target, scaling scope, split behavior, random state, windows, horizons, folds,
+training settings, architecture constants, all candidate values, algebra bug
+compatibility, output paths, TensorBoard behavior, and smoke-test limits. The
+runner does not contain a hidden best configuration or published score.
+
+First run the bounded smoke test:
+
+```bash
+hypercast4d-reproduce --quick
+```
+
+It uses the `execution.quick` limits in the YAML and writes to
+`results/paper_reproduction_quick/`. A successful smoke test checks the entire
+pipeline, but its deliberately truncated results are not comparable with the
+paper.
+
+The complete command is:
+
+```bash
+hypercast4d-reproduce
+```
+
+The committed search contains 160 CNN, 160 LSTM, and 576 hypercomplex
+candidates. Across 16 window/horizon cells and 10 folds, that is 143,360 model
+fits of 50 epochs each. It can take many hours or days on one CPU. Progress is
+persisted after every fold in:
+
+| File | Contents |
+|---|---|
+| `folds.csv` | Every candidate's individual fold MAE and MSE |
+| `candidates.csv` | Mean and standard deviation across folds |
+| `best.csv` | Lowest-mean-MAE candidate for each model and cell |
+| `status.json` | Completed and total fit counts |
+| `resolved_config.yaml` | Exact settings captured before fitting starts |
+| `metadata.json` | Software versions and the complete resolved configuration |
+
+The notebook accepts an algebra candidate but always passes `quaternions` to
+`HyperDense`. The default `hyper_algebra_behavior: force_quaternion` reproduces
+that implementation exactly and records both the declared and effective
+algebra. Set it to `declared` only when intentionally correcting that bug.
+
+This path is a PyTorch numerical equivalent of the TensorFlow 2.12 notebook,
+not a bit-for-bit TensorFlow rerun. Its layer topology, parameter counts,
+preprocessing, splits, folds, optimizer settings, epoch count, and MAE selection
+rule match the released code. Random initialization and framework kernels can
+still produce different floating-point scores. The supplement does not include
+the code that generated its separate reordered-input `HNNOrder` results, so the
+configuration includes only the input order whose executable code was released.
 
 ## Live results dashboard
 
@@ -413,13 +483,15 @@ model level:
 - the default dropout is `0.5`, max-pool size is `2`, convolution kernel is
   `3`, and training uses Adam, MSE, 50 epochs, and batch size `32`.
 
-This repository is a **bounded, corrected evaluation**, not a bit-for-bit
-reproduction of the paper's grid search. The committed YAML chooses one
-explicit architecture from each published search space and evaluates three of
-the paper's sixteen window/horizon cells over five seeds. Persistence and
-linear models are additional baselines. Reproducing the paper's complete
-search would require 159 CNN, 159 LSTM, and 575 hypercomplex candidates for
-each cell under ten-fold cross-validation.
+The default `hypercast4d-run` command is a **bounded, corrected evaluation**,
+not a bit-for-bit reproduction of the paper's grid search. Its committed YAML
+chooses one explicit architecture from each published search space and evaluates
+three of the paper's sixteen window/horizon cells over five seeds. Persistence
+and linear models are additional baselines. The separate
+`hypercast4d-reproduce` command implements the complete released-notebook
+protocol. The Cartesian grids contain 160 CNN, 160 LSTM, and 576 hypercomplex
+candidates; the paper text's 159/159/575 figures are each one below the actual
+grid produced by its notebook.
 
 The only values fixed in source are implementation invariants: four algebra
 components, the three published multiplication tables, the supported model
@@ -486,7 +558,8 @@ ignored by Git, so overwriting them cannot be recovered through Git history.
 
 ```text
 hypercast4d/
-├── configs/evaluation.yaml       # Default experiment settings
+├── configs/evaluation.yaml          # Default experiment settings
+├── configs/paper_reproduction.yaml # Released-notebook protocol and full grids
 ├── src/hypercast4d/
 │   ├── algebras.py               # 4D multiplication tables
 │   ├── layers.py                 # HyperDense implementation
@@ -494,6 +567,7 @@ hypercast4d/
 │   ├── models.py                 # Seven forecasting models
 │   ├── training.py               # Training and metrics
 │   ├── experiment.py             # Evaluation CLI and result generation
+│   ├── reproduction.py           # Complete released-notebook grid-search CLI
 │   ├── dashboard.py              # Auto-refreshing local results dashboard
 │   └── download.py               # Supplement downloader and verification
 ├── tests/                        # Algebra, gradient, data, and model tests

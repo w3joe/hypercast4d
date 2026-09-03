@@ -1,0 +1,92 @@
+protocol:
+  name: supplementary-notebook-v1
+  framework: pytorch-equivalent
+  metric: mae
+  metric_scale: normalized
+
+data:
+  path: data/raw/paper_data.xlsx
+  input_orders:
+    - name: published
+      columns: [Copper, FCX, CLP, SCCO]
+      target_column: Copper
+  scaler:
+    name: minmax
+    feature_range: [0.0, 1.0]
+    fit_scope: complete_dataset
+  windows: [10, 20, 40, 60]
+  horizons: [1, 5, 10, 20]
+  holdout:
+    fraction: 0.20
+    shuffle: true
+    random_state: 42
+
+cross_validation:
+  folds: 10
+  shuffle: false
+  random_state: null
+
+training:
+  epochs: 50
+  batch_size: 32
+  shuffle: true
+  random_seed: null
+  loss: mse
+  optimizer:
+    name: adam
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-7
+    amsgrad: false
+  early_stopping_patience: null
+  early_stopping_min_delta: 0.0
+  restore_best_weights: false
+  device: cpu
+
+architecture:
+  convolution:
+    kernel_size: 3
+  pooling:
+    size: 2
+  dropout: 0.50
+
+search_spaces:
+  cnn:
+    units: [8, 16, 32, 64, 128]
+    dense_before_pool: [false, true]
+    dense_after_pool: [false, true]
+    dense_units: [8, 16, 32, 64]
+    activation: [linear, relu]
+  lstm:
+    units: [8, 16, 32, 64, 128]
+    dense_before_pool: [false, true]
+    dense_after_pool: [false, true]
+    dense_units: [8, 16, 32, 64]
+    activation: [linear, relu]
+  hyper:
+    units: [1, 2, 4, 8, 16, 32]
+    dense_before_pool: [false, true]
+    dense_after_pool: [false, true]
+    dense_units: [8, 16, 32, 64]
+    activation: [linear, relu]
+    declared_algebra: [quaternion, cl11, coquaternion]
+
+# The released notebook passes an algebra through GridSearchCV but then creates
+# every HyperDense layer with quaternions. "force_quaternion" reproduces that
+# code bug. Change to "declared" to test the paper's intended three algebras.
+hyper_algebra_behavior: force_quaternion
+forced_hyper_algebra: quaternion
+
+execution:
+  output_dir: results/paper_reproduction
+  tensorboard:
+    enabled: false
+    log_dir: runs/paper_reproduction
+    flush_seconds: 30
+  quick:
+    order_count: 1
+    cell_count: 1
+    folds: 2
+    epochs: 3
+    candidates_per_model: 2
