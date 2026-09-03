@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from fastapi.testclient import TestClient
 
 from hypercast4d.architecture import presets
@@ -19,6 +20,32 @@ def test_evaluation_presets_normalize_with_safe_defaults() -> None:
     assert quick["cells"] == [{"window": 10, "horizon": 1}]
     assert quick["seeds"] == [7]
     assert quick["data_path"] == "data/raw/paper_data.xlsx"
+    assert quick["protocol"] == "chronological-v1"
+    assert quick["loss"] == "mse"
+    assert quick["early_stopping_patience"] is None
+    assert quick["restore_best_weights"] is False
+
+
+def test_playground_fit_defaults_match_main_evaluation_config() -> None:
+    config = yaml.safe_load(Path("configs/evaluation.yaml").read_text(encoding="utf-8"))
+    evaluation = normalize_evaluation({"preset": "standard"})
+    training = config["training"]
+    optimizer = training["optimizer"]
+
+    assert evaluation["cells"] == config["experiment"]["cells"]
+    assert evaluation["seeds"] == config["experiment"]["seeds"]
+    assert evaluation["epochs"] == training["epochs"]
+    assert evaluation["batch_size"] == training["batch_size"]
+    assert evaluation["evaluation_batch_size"] == training["evaluation_batch_size"]
+    assert evaluation["learning_rate"] == optimizer["learning_rate"]
+    assert evaluation["adam_beta1"] == optimizer["beta1"]
+    assert evaluation["adam_beta2"] == optimizer["beta2"]
+    assert evaluation["adam_epsilon"] == optimizer["epsilon"]
+    assert evaluation["adam_amsgrad"] == optimizer["amsgrad"]
+    assert evaluation["loss"] == training["loss"]
+    assert evaluation["shuffle"] == training["shuffle"]
+    assert evaluation["early_stopping_patience"] == training["early_stopping_patience"]
+    assert evaluation["restore_best_weights"] == training["restore_best_weights"]
 
 
 def test_evaluation_rejects_paths_outside_data() -> None:
@@ -99,6 +126,25 @@ def test_playground_api_exposes_catalog_validation_and_saved_architectures(
         records = client.get("/api/v1/architectures").json()
         assert records[0]["id"] == saved.json()["id"]
         assert client.get("/").status_code == 200
+
+
+def test_playground_reads_main_reproduction_results(tmp_path: Path) -> None:
+    reproduction = tmp_path / "paper_reproduction"
+    reproduction.mkdir()
+    (reproduction / "candidates.csv").write_text(
+        "input_order,window,horizon,model,candidate,mae_mean_scaled,"
+        "mae_std_scaled,parameters,train_seconds_mean,declared_algebra,"
+        "effective_algebra,settings_json\n"
+        'published,10,1,cnn,0,0.08,0.01,145,1.2,,,"{}"\n'
+        'published,10,1,cnn,1,0.06,0.02,145,1.3,,,"{}"\n',
+        encoding="utf-8",
+    )
+    app = create_app(tmp_path / "playground", tmp_path, reproduction)
+    with TestClient(app) as client:
+        rows = client.get("/api/runs").json()
+        assert len(rows) == 1
+        assert rows[0]["candidate"] == 1
+        assert rows[0]["mae"] == 0.06
 
 
 def test_worker_completes_a_real_validation_job(

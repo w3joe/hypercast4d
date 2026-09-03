@@ -29,7 +29,11 @@ from .architecture import (
     presets,
     validate_architecture,
 )
-from .playground_runner import EVALUATION_PRESETS, normalize_evaluation
+from .playground_runner import (
+    EVALUATION_DEFAULTS,
+    EVALUATION_PRESETS,
+    normalize_evaluation,
+)
 
 
 TERMINAL_STATES = {"complete", "failed", "cancelled", "interrupted"}
@@ -223,6 +227,7 @@ class JobManager:
             "candidate_hash": request["candidate_hash"],
             "architecture_name": request["architecture"]["name"],
             "preset": request["evaluation"]["preset"],
+            "protocol": request["evaluation"]["protocol"],
             "error": None,
         }
         _atomic_json(job_dir / "status.json", status)
@@ -345,6 +350,7 @@ def create_app(
             **layer_catalog(),
             "presets": presets(),
             "evaluation_presets": EVALUATION_PRESETS,
+            "evaluation_defaults": EVALUATION_DEFAULTS,
         }
 
     @app.post("/api/v1/architectures/validate")
@@ -420,14 +426,19 @@ def create_app(
 
     @app.get("/api/runs")
     def legacy_runs() -> list[dict[str, Any]]:
-        return _csv_rows(legacy_results / "runs.csv")
+        # Use the same reader as the main dashboard so both leakage-safe
+        # evaluation runs and released-notebook reproduction candidates appear
+        # correctly in the unified Runs view.
+        from .dashboard import load_runs
+
+        return load_runs(legacy_results)
 
     @app.get("/api/status")
     def legacy_status() -> dict[str, Any]:
-        return _read_json(
-            legacy_results / "status.json",
-            {"state": "waiting", "completed": 0, "total": 0},
-        )
+        from .dashboard import load_status
+
+        rows = legacy_runs()
+        return load_status(legacy_results, len(rows))
 
     static_root = Path(__file__).with_name("web_dist")
     assets = static_root / "assets"

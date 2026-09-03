@@ -135,6 +135,10 @@ input:disabled, select:disabled { opacity: .55; }
 .evaluation-panel summary::-webkit-details-marker { display: none; }
 .evaluation-panel summary svg { color: var(--accent); }
 .evaluation-panel summary span { margin-left: auto; color: #07111f; background: var(--accent); border-radius: 999px; padding: 4px 7px; font-size: .62rem; text-transform: uppercase; }
+.protocol-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 10px; border: 1px solid #285f54; border-radius: 8px; color: #acd9cd; background: #0c2826; font-size: .68rem; line-height: 1.45; }
+.protocol-note svg { color: var(--accent); flex: 0 0 auto; }
+.protocol-note strong { color: #d9fff4; }
+.protocol-note code { color: #95caff; }
 .evaluation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 10px; margin-top: 10px; }
 .evaluation-grid label:first-of-type, .evaluation-grid label:nth-of-type(2) { grid-column: span 2; }
 .error-notice, .success-notice { display: flex; align-items: center; gap: 7px; border-radius: 9px; padding: 10px 12px; font-size: .76rem; margin: 9px 0; }

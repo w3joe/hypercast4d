@@ -88,19 +88,11 @@ function newId(type: string): string {
 function evaluationFromPreset(catalog: Catalog, presetName: 'quick' | 'standard' | 'robust'): EvaluationSpec {
   const preset = catalog.evaluation_presets[presetName]
   return {
+    ...clone(catalog.evaluation_defaults),
     preset: presetName,
-    data_path: 'data/raw/paper_data.xlsx',
-    target_column: 'Copper',
     cells: clone(preset.cells),
     seeds: [...preset.seeds],
     epochs: preset.epochs,
-    batch_size: 32,
-    evaluation_batch_size: 256,
-    learning_rate: 0.001,
-    loss: 'mse',
-    early_stopping_patience: 10,
-    early_stopping_min_delta: 0,
-    device: 'cpu',
   }
 }
 
@@ -355,6 +347,10 @@ function EvaluationPanel({
   return (
     <details className="evaluation-panel panel-surface">
       <summary><FlaskConical size={16} />Evaluation settings<span>{evaluation.preset}</span></summary>
+      <div className="protocol-note">
+        <Check size={15} />
+        <span><strong>Main run protocol</strong> · chronological split · training-only scaling · Adam defaults from <code>configs/evaluation.yaml</code></span>
+      </div>
       <div className="evaluation-grid">
         <label><span>Preset</span><select value={evaluation.preset} onChange={(event) => loadPreset(event.target.value as EvaluationSpec['preset'])}><option value="quick">Quick</option><option value="standard">Standard</option><option value="robust">Robust</option></select></label>
         <label><span>Target</span><select value={evaluation.target_column} onChange={(event) => onChange({ ...evaluation, target_column: event.target.value })}>{dataColumns.map((column) => <option key={column}>{column}</option>)}</select></label>
@@ -366,6 +362,8 @@ function EvaluationPanel({
         <label><span>Loss</span><select value={evaluation.loss} onChange={(event) => onChange({ ...evaluation, loss: event.target.value as EvaluationSpec['loss'] })}><option value="mse">MSE</option><option value="mae">MAE</option><option value="huber">Huber</option></select></label>
         <label><span>Patience</span><input type="number" value={evaluation.early_stopping_patience ?? ''} onChange={(event) => onChange({ ...evaluation, early_stopping_patience: event.target.value ? Number(event.target.value) : null })} /></label>
         <label><span>Device</span><select value={evaluation.device} onChange={(event) => onChange({ ...evaluation, device: event.target.value as EvaluationSpec['device'] })}><option value="cpu">CPU</option><option value="auto">Auto</option><option value="mps">Apple MPS</option><option value="cuda">CUDA</option></select></label>
+        <label className="checkbox-row"><input type="checkbox" checked={evaluation.shuffle} onChange={(event) => onChange({ ...evaluation, shuffle: event.target.checked })} /><span>Shuffle training batches</span></label>
+        <label className="checkbox-row"><input type="checkbox" checked={evaluation.restore_best_weights} disabled={evaluation.early_stopping_patience == null} onChange={(event) => onChange({ ...evaluation, restore_best_weights: event.target.checked })} /><span>Restore best weights</span></label>
       </div>
     </details>
   )
@@ -530,6 +528,7 @@ function RunsView({ jobs, legacyRuns }: { jobs: Job[]; legacyRuns: Record<string
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
   })
   const log = useQuery({ queryKey: ['job-log', logJob], queryFn: () => api.log(logJob!), enabled: Boolean(logJob), refetchInterval: 2000 })
+  const reproduction = legacyRuns.some((run) => run.candidate != null)
   return (
     <section className="content-view">
       <div className="view-heading"><div><span className="eyebrow">Experiment lifecycle</span><h2>Runs</h2></div><span>{jobs.length} persisted jobs</span></div>
@@ -539,7 +538,7 @@ function RunsView({ jobs, legacyRuns }: { jobs: Job[]; legacyRuns: Record<string
           const percent = job.status.total ? Math.round(job.status.completed / job.status.total * 100) : 0
           const active = ['queued', 'starting', 'running'].includes(job.status.state)
           return <article className="job-card panel-surface" key={job.id}>
-            <div className="job-top"><div><span className={statusClass(job.status.state)}>{job.status.state}</span><h3>{job.status.architecture_name}</h3><p>{job.status.phase.replace('_', ' ')} · {job.status.preset} · {job.id}</p></div><div className="job-actions"><button className="text-button" onClick={() => setLogJob(logJob === job.id ? null : job.id)}>View log</button>{active && <button className="danger-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate(job.id)}><CircleStop size={14} />Cancel</button>}</div></div>
+            <div className="job-top"><div><span className={statusClass(job.status.state)}>{job.status.state}</span><h3>{job.status.architecture_name}</h3><p>{job.status.phase.replace('_', ' ')} · {job.status.protocol ?? 'chronological-v1'} · {job.status.preset} · {job.id}</p></div><div className="job-actions"><button className="text-button" onClick={() => setLogJob(logJob === job.id ? null : job.id)}>View log</button>{active && <button className="danger-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate(job.id)}><CircleStop size={14} />Cancel</button>}</div></div>
             <div className="progress-track"><div style={{ width: `${percent}%` }} /></div>
             <div className="job-meta"><span>{job.status.completed} / {job.status.total || '—'} runs</span><span>{percent}%</span>{job.status.current && <span>w{job.status.current.window}/h{job.status.current.horizon} · seed {job.status.current.seed} · epoch {job.status.current.epoch}/{job.status.current.epochs}</span>}<span>Updated {new Date(job.status.updated_at).toLocaleString()}</span></div>
             {job.status.error && <div className="inline-error">{job.status.error}</div>}
@@ -548,7 +547,7 @@ function RunsView({ jobs, legacyRuns }: { jobs: Job[]; legacyRuns: Record<string
           </article>
         })}
       </div>
-      {legacyRuns.length > 0 && <section className="legacy-runs panel-surface"><div className="panel-title"><Activity size={17} /><span>Legacy evaluation results</span></div><p className="muted-copy">Read-only runs from the directory supplied with <code>--results</code>.</p><div className="comparison-table"><table><thead><tr><th>Model</th><th>Window</th><th>Horizon</th><th>Seed</th><th>MAE</th><th>MSE</th><th>Parameters</th></tr></thead><tbody>{legacyRuns.slice(-12).reverse().map((run, index) => <tr key={`${run.model}-${run.seed}-${index}`}><td><strong>{run.model}</strong></td><td>{run.window}</td><td>{run.horizon}</td><td>{run.seed}</td><td>{formatMetric(Number(run.mae), 5)}</td><td>{formatMetric(Number(run.mse), 5)}</td><td>{Number(run.parameters).toLocaleString()}</td></tr>)}</tbody></table></div></section>}
+      {legacyRuns.length > 0 && <section className="legacy-runs panel-surface"><div className="panel-title"><Activity size={17} /><span>{reproduction ? 'Released-notebook reproduction results' : 'Main evaluation results'}</span></div><p className="muted-copy">Read-only results from the directory supplied with <code>--results</code>. {reproduction ? 'MAE values are normalized cross-validation scores, matching the paper reproduction runner.' : 'MAE and MSE are in original target units, matching the leakage-safe main runner.'}</p><div className="comparison-table"><table><thead><tr><th>Model</th><th>Window</th><th>Horizon</th><th>{reproduction ? 'Candidate' : 'Seed'}</th><th>{reproduction ? 'CV MAE (scaled)' : 'MAE'}</th><th>{reproduction ? 'MAE std' : 'MSE'}</th><th>Parameters</th></tr></thead><tbody>{legacyRuns.slice(-12).reverse().map((run, index) => <tr key={`${run.model}-${run.seed ?? run.candidate}-${index}`}><td><strong>{run.model}</strong></td><td>{run.window}</td><td>{run.horizon}</td><td>{reproduction ? run.candidate : run.seed}</td><td>{formatMetric(Number(run.mae), 5)}</td><td>{formatMetric(reproduction ? Number(run.mae_std) : Number(run.mse), 5)}</td><td>{Number(run.parameters).toLocaleString()}</td></tr>)}</tbody></table></div></section>}
     </section>
   )
 }

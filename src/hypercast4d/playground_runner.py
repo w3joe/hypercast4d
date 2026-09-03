@@ -53,6 +53,29 @@ EVALUATION_PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Keep the playground's default fit semantics identical to the practical
+# paper-aligned runner in ``configs/evaluation.yaml``. The playground adds a
+# validation-first/test-once workflow around these settings; it does not
+# silently change the optimizer or checkpoint behavior.
+EVALUATION_DEFAULTS: dict[str, Any] = {
+    "protocol": "chronological-v1",
+    "data_path": "data/raw/paper_data.xlsx",
+    "target_column": "Copper",
+    "batch_size": 32,
+    "evaluation_batch_size": 256,
+    "learning_rate": 0.001,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.999,
+    "adam_epsilon": 1.0e-7,
+    "adam_amsgrad": False,
+    "loss": "mse",
+    "shuffle": True,
+    "early_stopping_patience": None,
+    "early_stopping_min_delta": 0.0,
+    "restore_best_weights": False,
+    "device": "cpu",
+}
+
 
 def _integer(value: Any, name: str, minimum: int, maximum: int) -> int:
     if isinstance(value, bool):
@@ -97,45 +120,93 @@ def normalize_evaluation(raw: dict[str, Any] | None) -> dict[str, Any]:
     seeds = [_integer(seed, "seed", 0, 2**31 - 1) for seed in seeds_raw]
     if len(set(seeds)) != len(seeds):
         raise ValueError("seeds must be unique")
-    loss = str(raw.get("loss", "mse"))
+    protocol = str(raw.get("protocol", EVALUATION_DEFAULTS["protocol"]))
+    if protocol != "chronological-v1":
+        raise ValueError("protocol must be chronological-v1")
+    loss = str(raw.get("loss", EVALUATION_DEFAULTS["loss"]))
     if loss not in {"mse", "mae", "huber"}:
         raise ValueError("loss must be mse, mae, or huber")
-    device = str(raw.get("device", "cpu"))
+    device = str(raw.get("device", EVALUATION_DEFAULTS["device"]))
     if device not in {"cpu", "auto", "mps", "cuda"}:
         raise ValueError("device must be cpu, auto, mps, or cuda")
-    patience_raw = raw.get("early_stopping_patience", 10)
+    patience_raw = raw.get(
+        "early_stopping_patience",
+        EVALUATION_DEFAULTS["early_stopping_patience"],
+    )
     patience = (
         None
         if patience_raw is None
         else _integer(patience_raw, "early_stopping_patience", 1, 1000)
     )
-    target_column = str(raw.get("target_column", "Copper")).strip()
+    target_column = str(
+        raw.get("target_column", EVALUATION_DEFAULTS["target_column"])
+    ).strip()
     if not target_column or len(target_column) > 128:
         raise ValueError("target_column is invalid")
-    data_path = str(raw.get("data_path", "data/raw/paper_data.xlsx"))
+    data_path = str(raw.get("data_path", EVALUATION_DEFAULTS["data_path"]))
     path = Path(data_path)
     if path.is_absolute() or ".." in path.parts:
         raise ValueError("data_path must be a relative path inside the project")
     if not data_path.startswith("data/"):
         raise ValueError("data_path must be inside data/")
+    beta1 = float(raw.get("adam_beta1", EVALUATION_DEFAULTS["adam_beta1"]))
+    beta2 = float(raw.get("adam_beta2", EVALUATION_DEFAULTS["adam_beta2"]))
+    if not 0 <= beta1 < 1 or not 0 <= beta2 < 1:
+        raise ValueError("Adam beta values must be in [0, 1)")
+    minimum_delta = float(
+        raw.get(
+            "early_stopping_min_delta",
+            EVALUATION_DEFAULTS["early_stopping_min_delta"],
+        )
+    )
+    if minimum_delta < 0:
+        raise ValueError("early_stopping_min_delta must not be negative")
     return {
+        "protocol": protocol,
         "preset": preset_name,
         "data_path": data_path,
         "target_column": target_column,
         "cells": cells,
         "seeds": seeds,
         "epochs": _integer(raw.get("epochs", preset["epochs"]), "epochs", 1, 5000),
-        "batch_size": _integer(raw.get("batch_size", 32), "batch_size", 1, 8192),
+        "batch_size": _integer(
+            raw.get("batch_size", EVALUATION_DEFAULTS["batch_size"]),
+            "batch_size",
+            1,
+            8192,
+        ),
         "evaluation_batch_size": _integer(
-            raw.get("evaluation_batch_size", 256),
+            raw.get(
+                "evaluation_batch_size",
+                EVALUATION_DEFAULTS["evaluation_batch_size"],
+            ),
             "evaluation_batch_size",
             1,
             8192,
         ),
-        "learning_rate": _positive_float(raw.get("learning_rate", 0.001), "learning_rate"),
+        "learning_rate": _positive_float(
+            raw.get("learning_rate", EVALUATION_DEFAULTS["learning_rate"]),
+            "learning_rate",
+        ),
+        "adam_beta1": beta1,
+        "adam_beta2": beta2,
+        "adam_epsilon": _positive_float(
+            raw.get("adam_epsilon", EVALUATION_DEFAULTS["adam_epsilon"]),
+            "adam_epsilon",
+        ),
+        "adam_amsgrad": bool(
+            raw.get("adam_amsgrad", EVALUATION_DEFAULTS["adam_amsgrad"])
+        ),
         "loss": loss,
+        "shuffle": bool(raw.get("shuffle", EVALUATION_DEFAULTS["shuffle"])),
         "early_stopping_patience": patience,
-        "early_stopping_min_delta": float(raw.get("early_stopping_min_delta", 0.0)),
+        "early_stopping_min_delta": minimum_delta,
+        "restore_best_weights": bool(
+            raw.get(
+                "restore_best_weights",
+                EVALUATION_DEFAULTS["restore_best_weights"],
+            )
+        ),
         "device": device,
         "folds": preset["folds"],
     }
@@ -248,12 +319,12 @@ def _fit_kwargs(evaluation: dict[str, Any], device: torch.device) -> dict[str, A
     return {
         "batch_size": evaluation["batch_size"],
         "learning_rate": evaluation["learning_rate"],
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.999,
-        "adam_epsilon": 1.0e-7,
-        "adam_amsgrad": False,
+        "adam_beta1": evaluation["adam_beta1"],
+        "adam_beta2": evaluation["adam_beta2"],
+        "adam_epsilon": evaluation["adam_epsilon"],
+        "adam_amsgrad": evaluation["adam_amsgrad"],
         "loss_name": evaluation["loss"],
-        "shuffle": True,
+        "shuffle": evaluation["shuffle"],
         "early_stopping_min_delta": evaluation["early_stopping_min_delta"],
         "device": device,
     }
@@ -320,7 +391,7 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
                     seed=seed,
                     epochs=evaluation["epochs"],
                     early_stopping_patience=evaluation["early_stopping_patience"],
-                    restore_best_weights=True,
+                    restore_best_weights=evaluation["restore_best_weights"],
                     epoch_callback=report_epoch,
                     **_fit_kwargs(evaluation, device),
                 )

@@ -240,6 +240,15 @@ runs cannot unlock the test set. A completed Standard or Robust candidate can
 be sent to the held-out test set once through the explicit **Final test**
 action. This is designed to prevent repeatedly tuning against test results.
 
+The five locked **Paper** presets are executable equivalents of the canonical
+models in `src/hypercast4d/models.py`, including Keras-style initialization,
+causal padding, the full-sequence LSTM, dense/pooling/dropout scaffold, and
+parameter counts. Playground runs use the same `chronological-v1` data path,
+Adam defaults, MSE loss, batch size, epoch count, shuffle behavior, and disabled
+early stopping declared in `configs/evaluation.yaml`. The validation-first and
+test-once staging is an intentional guard around that main runner, not a change
+to the neural network or its fit settings.
+
 Architectures can be saved locally or exported as YAML. Playground state is
 written beneath `results/playground/`:
 
@@ -278,6 +287,12 @@ To show the released-notebook reproduction results, including the quick run:
 
 ```bash
 hypercast4d-dashboard --results results/paper_reproduction_quick
+```
+
+The same results can be shown in the playground's **Runs** view:
+
+```bash
+hypercast4d-playground --results results/paper_reproduction_20min
 ```
 
 For reproduction outputs, the graph shows the lowest normalized

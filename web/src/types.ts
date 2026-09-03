@@ -37,6 +37,7 @@ export type Catalog = {
   activations: string[]
   presets: ArchitectureSpec[]
   evaluation_presets: Record<string, EvaluationPreset>
+  evaluation_defaults: EvaluationDefaults
 }
 
 export type EvaluationCell = { window: number; horizon: number }
@@ -48,20 +49,30 @@ export type EvaluationPreset = {
   folds: { train_fraction: number; validation_fraction: number }[]
 }
 
-export type EvaluationSpec = {
-  preset: 'quick' | 'standard' | 'robust'
+export type EvaluationDefaults = {
+  protocol: 'chronological-v1'
   data_path: string
   target_column: string
-  cells: EvaluationCell[]
-  seeds: number[]
-  epochs: number
   batch_size: number
   evaluation_batch_size: number
   learning_rate: number
+  adam_beta1: number
+  adam_beta2: number
+  adam_epsilon: number
+  adam_amsgrad: boolean
   loss: 'mse' | 'mae' | 'huber'
+  shuffle: boolean
   early_stopping_patience: number | null
   early_stopping_min_delta: number
+  restore_best_weights: boolean
   device: 'cpu' | 'auto' | 'mps' | 'cuda'
+}
+
+export type EvaluationSpec = EvaluationDefaults & {
+  preset: 'quick' | 'standard' | 'robust'
+  cells: EvaluationCell[]
+  seeds: number[]
+  epochs: number
 }
 
 export type TraceEntry = {
@@ -118,6 +129,7 @@ export type Job = {
     updated_at: string
     architecture_name: string
     preset: string
+    protocol: 'chronological-v1'
     error?: string | null
     current?: {
       window: number

@@ -33,6 +33,24 @@ beforeEach(() => {
         standard: { cells: [{ window: 10, horizon: 1 }], seeds: [7], epochs: 50, folds: [] },
         robust: { cells: [{ window: 10, horizon: 1 }], seeds: [7], epochs: 50, folds: [] },
       },
+      evaluation_defaults: {
+        protocol: 'chronological-v1',
+        data_path: 'data/raw/paper_data.xlsx',
+        target_column: 'Copper',
+        batch_size: 32,
+        evaluation_batch_size: 256,
+        learning_rate: 0.001,
+        adam_beta1: 0.9,
+        adam_beta2: 0.999,
+        adam_epsilon: 1e-7,
+        adam_amsgrad: false,
+        loss: 'mse',
+        shuffle: true,
+        early_stopping_patience: null,
+        early_stopping_min_delta: 0,
+        restore_best_weights: false,
+        device: 'cpu',
+      },
     } : path.includes('validate') ? {
       valid: true,
       spec: paperPreset,
@@ -52,6 +70,7 @@ describe('architecture playground', () => {
     render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>)
     expect(await screen.findByText('Architecture canvas')).toBeInTheDocument()
     expect(screen.getByText('Paper reference')).toBeInTheDocument()
+    expect(screen.getByText('Main run protocol')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /clone to edit/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /run validation/i })).toBeInTheDocument()
   })

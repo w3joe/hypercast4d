@@ -40,10 +40,13 @@ def test_paper_presets_match_existing_parameter_counts(
         "dropout": 0.5,
         "pool_size": 2,
     }
-    expected = build_model(model_name, window=10, horizon=5, **options)
-    compiled = build_architecture(_preset(preset_id), window=10, horizon=5)
+    torch.manual_seed(123)
+    expected = build_model(model_name, window=10, horizon=5, **options).eval()
+    torch.manual_seed(123)
+    compiled = build_architecture(_preset(preset_id), window=10, horizon=5).eval()
     assert parameter_count(compiled) == parameter_count(expected)
-    assert compiled(torch.randn(3, 10, 4)).shape == (3, 5)
+    inputs = torch.randn(3, 10, 4)
+    assert torch.equal(compiled(inputs), expected(inputs))
 
 
 def test_zero_initialized_residual_head_is_exact_persistence() -> None:
