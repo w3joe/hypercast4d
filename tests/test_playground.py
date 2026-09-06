@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from hypercast4d.architecture import presets
 from hypercast4d.playground import JobManager, create_app
 from hypercast4d.playground_runner import normalize_evaluation, run_job
+from hypercast4d.upstream_models import UPSTREAM_MODELS
 
 
 def _preset(preset_id: str) -> dict:
@@ -185,7 +186,9 @@ def test_playground_reads_main_reproduction_results(tmp_path: Path) -> None:
         assert rows[0]["mae"] == 0.06
 
 
-@pytest.mark.parametrize("preset_id", ["residual-tcn", "research-dlinear", "research-patchtst", "research-itransformer"])
+@pytest.mark.parametrize("preset_id", ["residual-tcn", "research-dlinear", "research-patchtst", "research-itransformer"] + [
+    f"tslib-{name}" for name in UPSTREAM_MODELS
+])
 def test_worker_completes_a_real_validation_job(
     tmp_path: Path, monkeypatch, preset_id: str
 ) -> None:

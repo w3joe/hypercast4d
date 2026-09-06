@@ -1,0 +1,39 @@
+{
+  "repository": "https://github.com/thuml/Time-Series-Library",
+  "commit": "4e938a1767106324dd753b2a44832bf870a0252e",
+  "license": "MIT",
+  "files": [
+    "layers/Autoformer_EncDec.py",
+    "layers/Conv_Blocks.py",
+    "layers/Crossformer_EncDec.py",
+    "layers/Embed.py",
+    "layers/MSGBlock.py",
+    "layers/SelfAttention_Family.py",
+    "layers/StandardNorm.py",
+    "layers/Transformer_EncDec.py",
+    "models/Crossformer.py",
+    "models/DLinear.py",
+    "models/FiLM.py",
+    "models/FreTS.py",
+    "models/LightTS.py",
+    "models/MICN.py",
+    "models/MSGNet.py",
+    "models/PatchTST.py",
+    "models/SCINet.py",
+    "models/SegRNN.py",
+    "models/TSMixer.py",
+    "models/TimeMixer.py",
+    "models/TimeXer.py",
+    "models/TimesNet.py",
+    "models/iTransformer.py",
+    "utils/masking.py",
+    "LICENSE"
+  ],
+  "changes": [
+    "Internal import namespace relocation",
+    "Reformer-only dependency made optional; supported adapters do not use it",
+    "FiLM: use registered CPU buffers and input-device allocation instead of a global CUDA device",
+    "TimesNet and MSGNet: exclude the FFT DC bin even when all amplitudes are zero",
+    "PatchTST, iTransformer, MSGNet, SCINet, TimeXer: out-of-place normalization and residual additions to permit gradients through preceding blocks"
+  ]
+}

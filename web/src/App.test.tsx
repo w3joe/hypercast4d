@@ -28,6 +28,10 @@ beforeEach(() => {
       algebras: ['quaternion', 'coquaternion', 'cl11'],
       activations: ['relu', 'gelu', 'silu', 'tanh', 'linear'],
       presets: [paperPreset],
+      method_collection: {
+        sources: { survey: { title: 'Survey', venue: 'FCS', url: 'https://example.com/paper.pdf', pages: '13' } },
+        methods: [{ id: 'quaternion', name: 'Quaternion', family: 'Hypercomplex', kind: 'neural', status: 'adaptation', preset_id: 'paper-quaternion', sources: [{ source_id: 'survey', page: 13 }], notes: 'Test preset.' }],
+      },
       evaluation_presets: {
         quick: { cells: [{ window: 10, horizon: 1 }], seeds: [7], epochs: 3, folds: [] },
         standard: { cells: [{ window: 10, horizon: 1 }], seeds: [7], epochs: 50, folds: [] },
@@ -77,6 +81,22 @@ beforeEach(() => {
 })
 
 describe('architecture playground', () => {
+  it('keeps edits across views and loads library methods into the canvas', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /clone to edit/i }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Architecture name' }), { target: { value: 'My experiment' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Runs/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Builder$/ }))
+    expect(screen.getByRole('textbox', { name: 'Architecture name' })).toHaveValue('My experiment')
+    fireEvent.click(screen.getByRole('button', { name: /Method library/ }))
+    expect(screen.getByRole('heading', { name: 'Find your next architecture.' })).toBeVisible()
+    expect(screen.queryByRole('textbox', { name: 'Architecture name' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load Quaternion' }))
+    expect(screen.getByRole('textbox', { name: 'Architecture name' })).toHaveValue('Paper Quaternion')
+    expect(screen.getByRole('button', { name: 'Canvas' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('opens on the locked paper builder with validation controls', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>)

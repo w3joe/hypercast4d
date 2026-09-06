@@ -13,8 +13,12 @@ from torch import nn
 
 from .algebras import COMPONENT_COUNT
 from .layers import HyperDense
+from .upstream_models import UPSTREAM_MODELS, UpstreamSequence, upstream_defaults
 from .models import CausalConv1d, parameter_count
-from .research_models import AttentionForecast, DLinear
+from .research_models import (
+    AttentionForecast, DLinear, Decomposition, PatchEmbedding,
+    SequenceAttention, TemporalProjection,
+)
 
 
 SCHEMA_VERSION = 1
@@ -23,6 +27,8 @@ ACTIVATIONS = ("relu", "gelu", "silu", "tanh", "linear")
 INPUT_REPRESENTATIONS = ("levels", "centered", "differences")
 HEAD_TYPES = ("direct", "persistence_residual", "cumulative_residual")
 RESEARCH_MODELS = {"dlinear", "patchtst", "itransformer"}
+RESEARCH_BLOCKS = {"decomposition", "patch_embedding", "temporal_attention",
+                   "variable_attention", "temporal_projection"}
 
 
 class ArchitectureError(ValueError):
@@ -138,14 +144,6 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
     zero_default = head_type != "direct"
     zero_initialize = bool(head_raw.get("zero_initialize", zero_default))
 
-    if any(layer["type"] in RESEARCH_MODELS for layer in layers):
-        if len(layers) != 1:
-            raise ArchitectureError("Research forecasters must be the only block in the pipeline")
-        if representation != "levels" or feature_order[0] != 0:
-            raise ArchitectureError("Research forecasters require levels and target feature 0 first")
-        if head_type != "direct" or zero_initialize:
-            raise ArchitectureError("Research forecasters require a direct, non-zero-initialized head")
-
     return {
         "schema_version": SCHEMA_VERSION,
         "name": name,
@@ -159,12 +157,32 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_layer_params(layer_type: str, params: dict[str, Any]) -> dict[str, Any]:
-    if layer_type == "dlinear":
+    if layer_type.startswith("tslib_"):
+        defaults = upstream_defaults(layer_type[6:])
+        bounds = {"d_model": (8, 256), "num_layers": (1, 3), "n_heads": (1, 16)}
+        normalized = {key: (_bounded_float(params.get(key, value), key, 0, 0.95)
+                            if key == "dropout" else _bounded_int(params.get(key, value), key, *bounds[key]))
+                      for key, value in defaults.items()}
+        if normalized.get("d_model", 32) % 8:
+            raise ArchitectureError("TSLib d_model must be a multiple of 8")
+        if normalized.get("d_model", 32) % normalized.get("n_heads", 4):
+            raise ArchitectureError("d_model must be divisible by n_heads")
+        return normalized
+    if layer_type == "temporal_projection":
+        return {"output_steps": _bounded_int(params.get("output_steps", 8), "output_steps", 1, 512)}
+    if layer_type == "patch_embedding":
+        patch = _bounded_int(params.get("patch_size", 4), "patch_size", 1, 128)
+        stride = _bounded_int(params.get("stride", 2), "stride", 1, 128)
+        if stride > patch:
+            raise ArchitectureError("stride must not exceed patch_size")
+        return {"d_model": _bounded_int(params.get("d_model", 32), "d_model", 1, 512),
+                "patch_size": patch, "stride": stride}
+    if layer_type in {"dlinear", "decomposition"}:
         kernel = _bounded_int(params.get("kernel_size", 25), "kernel_size", 1, 101)
         if kernel % 2 == 0:
-            raise ArchitectureError("DLinear kernel_size must be odd")
+            raise ArchitectureError("Decomposition kernel_size must be odd")
         return {"kernel_size": kernel}
-    if layer_type in {"patchtst", "itransformer"}:
+    if layer_type in {"patchtst", "itransformer", "temporal_attention", "variable_attention"}:
         normalized = {
             "d_model": _bounded_int(params.get("d_model", 32), "d_model", 4, 256),
             "n_heads": _bounded_int(params.get("n_heads", 4), "n_heads", 1, 16),
@@ -373,6 +391,32 @@ def _build_layer(
     layer_type = layer["type"]
     params = layer["params"]
     receptive_addition = 0
+    if layer_type.startswith("tslib_"):
+        if shape.kind != "sequence" or shape.steps is None:
+            raise ArchitectureError(f"{layer_type} requires a sequence; place it before sequence reduction")
+        return UpstreamSequence(layer_type[6:], shape.steps, shape.width, **params), shape, shape.steps - 1
+    if layer_type in RESEARCH_BLOCKS | RESEARCH_MODELS:
+        if shape.kind != "sequence" or shape.steps is None:
+            raise ArchitectureError(f"{layer_type} requires a sequence; place it before sequence reduction")
+        steps, width = shape.steps, shape.width
+        if layer_type == "decomposition":
+            return Decomposition(**params), TensorShape("sequence", width * 2, steps), params["kernel_size"] - 1
+        if layer_type == "temporal_projection":
+            return TemporalProjection(steps, width, **params), TensorShape("sequence", width, params["output_steps"]), steps - 1
+        if layer_type == "patch_embedding":
+            module = PatchEmbedding(steps, width, **params)
+            return module, TensorShape("sequence", params["d_model"], module.output_steps), params["patch_size"] - 1
+        if layer_type in {"temporal_attention", "variable_attention", "itransformer"}:
+            variables = layer_type != "temporal_attention"
+            return (SequenceAttention(steps, width, **params, variables=variables),
+                    TensorShape("sequence", width if variables else params["d_model"], steps), steps - 1)
+        # Legacy whole-model names remain usable in hybrid pipelines as sequence encoders.
+        if layer_type == "dlinear":
+            return nn.Sequential(Decomposition(**params), TemporalProjection(steps, width * 2, steps)), TensorShape("sequence", width * 2, steps), steps - 1
+        patch_params = {key: params[key] for key in ("d_model", "patch_size", "stride")}
+        patch = PatchEmbedding(steps, width, **patch_params)
+        attention_params = {key: value for key, value in params.items() if key not in {"patch_size", "stride"}}
+        return nn.Sequential(patch, SequenceAttention(patch.output_steps, params["d_model"], **attention_params)), TensorShape("sequence", params["d_model"], patch.output_steps), steps - 1
     if layer_type == "dense":
         module = nn.Linear(shape.width, params["units"])
         return module, TensorShape(shape.kind, params["units"], shape.steps), 0
@@ -490,7 +534,8 @@ class ExperimentalForecaster(nn.Module):
             raise ArchitectureError("feature_order references an unavailable feature")
         steps = window - 1 if self.representation == "differences" else window
         shape = TensorShape("sequence", len(self.feature_order), steps)
-        if self.spec["layers"] and self.spec["layers"][0]["type"] in RESEARCH_MODELS:
+        if (len(self.spec["layers"]) == 1 and self.spec["layers"][0]["type"] in RESEARCH_MODELS
+                and self.spec["head"] == {"type": "direct", "zero_initialize": False}):
             layer = self.spec["layers"][0]
             kind = layer["type"]
             module = (DLinear(window, horizon, **layer["params"]) if kind == "dlinear"
@@ -521,6 +566,11 @@ class ExperimentalForecaster(nn.Module):
                     + (layer["params"]["size"] - 1) * temporal_jump,
                 )
                 temporal_jump *= layer["params"]["stride"]
+            if layer["type"] == "patch_embedding":
+                temporal_jump *= layer["params"]["stride"]
+            if layer["type"] in {"flatten", "mean_pool"}:
+                # The reduced output can depend on every retained token.
+                receptive_field = min(steps, receptive_field + ((input_shape.steps or 1) - 1) * temporal_jump)
             modules.append(module)
             self.trace.append(
                 TraceEntry(
@@ -549,7 +599,11 @@ class ExperimentalForecaster(nn.Module):
 
     def _reset_initialization(self) -> None:
         """Use the paper/Keras conventions for comparable editable presets."""
+        upstream_modules = {child for module in self.modules()
+                            if isinstance(module, UpstreamSequence) for child in module.modules()}
         for module in self.modules():
+            if module in upstream_modules:
+                continue
             if isinstance(module, (nn.Linear, nn.Conv1d)):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
@@ -620,7 +674,9 @@ def architecture_hash(spec: dict[str, Any], evaluation: dict[str, Any] | None = 
 
 
 LAYER_TYPES = {
+    *(f"tslib_{method}" for method in UPSTREAM_MODELS),
     *RESEARCH_MODELS,
+    *RESEARCH_BLOCKS,
     "dense",
     "hyper_dense",
     "causal_conv",
@@ -642,6 +698,17 @@ def layer_catalog() -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "categories": [
+            {"name": "TSLib model blocks", "layers": [
+                {"type": f"tslib_{key}", "label": f"{name} (TSLib)", "defaults": upstream_defaults(key)}
+                for key, name in UPSTREAM_MODELS.items()
+            ]},
+            {"name": "Research blocks", "layers": [
+                {"type": "decomposition", "label": "Trend / seasonal split", "defaults": {"kernel_size": 25}},
+                {"type": "patch_embedding", "label": "Patch embedding", "defaults": {"d_model": 32, "patch_size": 4, "stride": 2}},
+                {"type": "temporal_attention", "label": "Temporal attention", "defaults": {"d_model": 32, "n_heads": 4, "num_layers": 2, "dropout": 0.1}},
+                {"type": "variable_attention", "label": "Cross-variable attention", "defaults": {"d_model": 32, "n_heads": 4, "num_layers": 2, "dropout": 0.1}},
+                {"type": "temporal_projection", "label": "Temporal projection", "defaults": {"output_steps": 8}},
+            ]},
             {
                 "name": "Feature mixing",
                 "layers": [
@@ -816,9 +883,20 @@ def presets() -> list[dict[str, Any]]:
     for kind, title in (("dlinear", "DLinear"), ("patchtst", "PatchTST"),
                         ("itransformer", "iTransformer")):
         output.append(normalize_architecture_spec({
-            "name": f"{title} (playground adaptation)",
-            "input": common_input,
-            "layers": [_layer("forecaster", kind)],
+            "name": f"{title}-inspired (editable)",
+            "input": {"representation": "levels", "feature_order": [0] if kind in {"dlinear", "patchtst"} else [0, 1, 2, 3]},
+            "layers": ({
+                "dlinear": [_layer("split", "decomposition"), _layer("project", "temporal_projection"), _layer("flatten", "flatten")],
+                "patchtst": [_layer("patches", "patch_embedding"), _layer("attention", "temporal_attention"), _layer("flatten", "flatten")],
+                "itransformer": [_layer("variables", "variable_attention"), _layer("flatten", "flatten")],
+            })[kind],
             "head": {"type": "direct", "zero_initialize": False},
         }) | {"locked": False, "preset_id": f"research-{kind}"})
+    for key, name in UPSTREAM_MODELS.items():
+        output.append(normalize_architecture_spec({
+            "name": f"{name} (TSLib core, editable)",
+            "input": {"representation": "levels", "feature_order": [0, 1, 2, 3]},
+            "layers": [_layer("core", f"tslib_{key}"), _layer("flatten", "flatten")],
+            "head": {"type": "direct", "zero_initialize": False},
+        }) | {"locked": False, "preset_id": f"tslib-{key}"})
     return copy.deepcopy(output)

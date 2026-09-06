@@ -110,6 +110,8 @@ if modal is not None:
     image = (
         modal.Image.debian_slim(python_version="3.12")
         .pip_install(
+            "einops>=0.8,<1",
+            "scipy>=1.13,<2",
             "numpy>=1.26",
             "openpyxl>=3.1",
             "pandas>=2.1",

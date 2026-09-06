@@ -1,6 +1,7 @@
 """Source-backed method index, distinct from executable architecture presets."""
 
 from copy import deepcopy
+from .upstream_models import UPSTREAM_MODELS
 
 
 SOURCES = {
@@ -73,12 +74,18 @@ def method_collection() -> dict:
         add(name, family, "deformtime", 7)
 
     for name, notes in {
-        "DLinear": "Runnable target-only decomposition baseline: separate trend and seasonal linear projections. Exogenous inputs are unused.",
-        "PatchTST": "Runnable target-only adaptation with patch attention, learned positions and window normalization. LayerNorm encoder; no residual attention or pretraining. Exogenous inputs are unused.",
-        "iTransformer": "Runnable adaptation with variable tokens and cross-variable attention. Window normalization, no calendar covariates, target-only loss.",
+        "DLinear": "Editable decomposition and temporal-projection blocks with a forecast head. Target-only by default; add features or mix in other layers. Inspired by DLinear, not an exact reproduction.",
+        "PatchTST": "Editable patch embedding and temporal attention. Target-only by default; adding features creates joint multivariate patches. No window normalization, residual attention or pretraining.",
+        "iTransformer": "Editable cross-variable attention projects variable tokens back to the time axis for further layers. All selected features feed the forecast head. No window normalization or calendar covariates.",
     }.items():
         methods[name].update(status="adaptation", preset_id=f"research-{name.lower()}", notes=notes)
     methods["DLinear"]["family"] = "Linear"
     methods["LTBoost"]["notes"] = "Linear regression with boosted-tree residuals; included for completeness, not a neural network."
     methods["DeformTime"]["notes"] = "Variable and temporal deformable attention with a GRU decoder. Reference only; the existing GRU block does not implement DeformTime."
+    for key, name in UPSTREAM_MODELS.items():
+        methods[name].update(
+            status="adaptation", preset_id=f"tslib-{key}",
+            notes="Pinned MIT-licensed TSLib model core inside an editable pipeline. History is left-padded to a multiple of 32; the same-length forecast feeds the playground head. No calendar covariates. This hybrid is not a published benchmark reproduction."
+                  + (" TSLib's simplified TSMixer variant, not Google's original implementation." if key == "tsmixer" else ""),
+        )
     return deepcopy({"sources": SOURCES, "methods": sorted(methods.values(), key=lambda item: item["name"].casefold())})

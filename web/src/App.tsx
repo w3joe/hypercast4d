@@ -452,6 +452,7 @@ function RunControls({
 }
 
 function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
+  const [workspace, setWorkspace] = useState<'canvas' | 'library'>('canvas')
   const queryClient = useQueryClient()
   const initialPreset = catalog.presets.find((preset) => preset.preset_id === 'paper-quaternion') ?? catalog.presets[0]
   const [architecture, setArchitecture] = useState<ArchitectureSpec>(() => clone(initialPreset))
@@ -543,6 +544,15 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
   }
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <div className="workspace-heading">
+        <div><span className="eyebrow">Forecasting lab</span><h1>{workspace === 'canvas' ? 'A space to experiment.' : 'Find your next architecture.'}</h1><p>{workspace === 'canvas' ? 'Shape a model, test an idea, and see what holds up.' : 'Explore the research and bring a method into your workspace.'}</p></div>
+        <div className="workspace-switch" aria-label="Workspace view">
+          <button aria-pressed={workspace === 'canvas'} onClick={() => setWorkspace('canvas')}><Blocks size={16} />Canvas</button>
+          <button aria-pressed={workspace === 'library'} onClick={() => setWorkspace('library')}><Layers3 size={16} />Method library<span>{catalog.method_collection?.methods.length ?? 0}</span></button>
+        </div>
+      </div>
+      <div hidden={workspace !== 'library'}><MethodCollection catalog={catalog} onLoad={(id) => { loadPreset(id); setWorkspace('canvas') }} /></div>
+      <div hidden={workspace !== 'canvas'}>
       <section className="builder-toolbar panel-surface">
         <div className="starting-points"><div className="preset-control"><span>Preset</span><select value={architecture.preset_id ?? ''} onChange={(event) => loadPreset(event.target.value)}><option value="" disabled>Custom architecture</option>{catalog.presets.map((preset) => <option value={preset.preset_id} key={preset.preset_id}>{preset.name}</option>)}</select></div><div className="preset-control"><span>Saved</span><select value={savedId} onChange={(event) => loadSaved(event.target.value)}><option value="">Choose saved…</option>{savedArchitectures.data?.map((record) => <option value={record.id} key={record.id}>{record.spec.name}</option>)}</select></div></div>
         <div className="toolbar-actions">
@@ -554,8 +564,7 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
         </div>
       </section>
       <ErrorNotice error={importError || validation.error || saveMutation.error} />
-      <MethodCollection catalog={catalog} onLoad={loadPreset} />
-      {catalog.method_collection?.methods.filter((method) => method.preset_id === architecture.preset_id).map((method) => <p className="muted-copy" key={method.id}>{method.notes} Use this complete forecaster as the only pipeline block, with levels input and a direct head.</p>)}
+      {catalog.method_collection?.methods.filter((method) => method.preset_id === architecture.preset_id).map((method) => <p className="muted-copy" key={method.id}>{method.notes} Add or rearrange blocks before sequence reduction to experiment.</p>)}
       {queuedMessage && <div className="success-notice"><Check size={15} />{queuedMessage} Track it in Runs.</div>}
       <section className="builder-grid">
         <aside className="palette panel-surface">
@@ -593,6 +602,7 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
           onLayer={(next) => setArchitecture({ ...architecture, layers: architecture.layers.map((layer) => layer.id === next.id ? next : layer) })}
         />
       </section>
+      </div>
     </DndContext>
   )
 }
@@ -667,10 +677,10 @@ function CompareView({ jobs }: { jobs: Job[] }) {
       {candidates.length > 0 && <>
         <div className="compare-selector panel-surface">{candidates.map((job) => <label className="checkbox-row" key={job.id}><input type="checkbox" checked={selected.includes(job.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, job.id] : selected.filter((id) => id !== job.id))} /><span>{job.status.architecture_name}</span><small>{job.status.preset}</small></label>)}</div>
         <div className="charts-grid">
-          <article className="chart-panel panel-surface"><h3>Error relative to persistence</h3><ResponsiveContainer width="100%" height={310}><BarChart data={data}><CartesianGrid stroke="#263956" vertical={false} /><XAxis dataKey="name" stroke="#91a5bc" tick={{ fontSize: 11 }} /><YAxis stroke="#91a5bc" /><Tooltip contentStyle={{ background: '#0d1a2a', border: '1px solid #2b4362' }} /><Legend /><Bar dataKey="mae" name="MAE ratio" fill="#48d7ae" radius={[4, 4, 0, 0]} /><Bar dataKey="mse" name="MSE ratio" fill="#58a6ff" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></article>
-          <article className="chart-panel panel-surface"><h3>Accuracy–parameter trade-off</h3><ResponsiveContainer width="100%" height={310}><ScatterChart><CartesianGrid stroke="#263956" /><XAxis type="number" dataKey="parameters" name="Parameters" stroke="#91a5bc" /><YAxis type="number" dataKey="mae" name="MAE ratio" stroke="#91a5bc" /><Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: '#0d1a2a', border: '1px solid #2b4362' }} /><Scatter data={data} fill="#ffca5c" /></ScatterChart></ResponsiveContainer></article>
+          <article className="chart-panel panel-surface"><h3>Error relative to persistence</h3><ResponsiveContainer width="100%" height={310}><BarChart data={data}><CartesianGrid stroke="#e0e5de" vertical={false} /><XAxis dataKey="name" stroke="#68736d" tick={{ fontSize: 11 }} /><YAxis stroke="#68736d" /><Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Legend /><Bar dataKey="mae" name="MAE ratio" fill="#287455" radius={[4, 4, 0, 0]} /><Bar dataKey="mse" name="MSE ratio" fill="#477cb2" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></article>
+          <article className="chart-panel panel-surface"><h3>Accuracy–parameter trade-off</h3><ResponsiveContainer width="100%" height={310}><ScatterChart><CartesianGrid stroke="#e0e5de" /><XAxis type="number" dataKey="parameters" name="Parameters" stroke="#68736d" /><YAxis type="number" dataKey="mae" name="MAE ratio" stroke="#68736d" /><Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Scatter data={data} fill="#b58e3d" /></ScatterChart></ResponsiveContainer></article>
         </div>
-        {leadSource && leadData.length > 0 && <article className="chart-panel panel-surface lead-chart"><h3>Per-lead MAE · {leadSource.status.architecture_name}</h3><ResponsiveContainer width="100%" height={250}><LineChart data={leadData}><CartesianGrid stroke="#263956" vertical={false} /><XAxis dataKey="lead" stroke="#91a5bc" label={{ value: 'Forecast lead', position: 'insideBottom', offset: -2 }} /><YAxis stroke="#91a5bc" /><Tooltip contentStyle={{ background: '#0d1a2a', border: '1px solid #2b4362' }} /><Legend /><Line type="monotone" dataKey="mae" name="Architecture MAE" stroke="#48d7ae" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="persistence" name="Persistence MAE" stroke="#58a6ff" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></article>}
+        {leadSource && leadData.length > 0 && <article className="chart-panel panel-surface lead-chart"><h3>Per-lead MAE · {leadSource.status.architecture_name}</h3><ResponsiveContainer width="100%" height={250}><LineChart data={leadData}><CartesianGrid stroke="#e0e5de" vertical={false} /><XAxis dataKey="lead" stroke="#68736d" label={{ value: 'Forecast lead', position: 'insideBottom', offset: -2 }} /><YAxis stroke="#68736d" /><Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Legend /><Line type="monotone" dataKey="mae" name="Architecture MAE" stroke="#287455" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="persistence" name="Persistence MAE" stroke="#477cb2" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></article>}
         <div className="comparison-table panel-surface"><table><thead><tr><th>Architecture</th><th>Preset</th><th>MAE ratio</th><th>MSE ratio</th><th>Parameters</th><th>Selection</th><th /></tr></thead><tbody>{visible.map((job) => { const row = data.find((item) => item.id === job.id)!; return <tr key={job.id}><td><strong>{row.name}</strong></td><td>{job.status.preset}</td><td className={row.mae < 1 ? 'metric-good' : ''}>{formatMetric(row.mae, 3)}</td><td className={row.mse < 1 ? 'metric-good' : ''}>{formatMetric(row.mse, 3)}</td><td>{Math.round(row.parameters).toLocaleString()}</td><td>{pareto.has(job.id) ? <span className="pareto-badge">Pareto best</span> : 'Dominated'}</td><td><FinalTestDialog job={job} onComplete={() => queryClient.invalidateQueries({ queryKey: ['jobs'] })} /></td></tr> })}</tbody></table></div>
       </>}
       {finalJobs.length > 0 && <section className="final-results panel-surface"><div className="panel-title"><LockKeyhole size={17} /><span>Held-out final tests</span></div><p className="muted-copy">These results are separated from architecture selection and cannot be rerun for the same candidate configuration.</p><div className="comparison-table"><table><thead><tr><th>Architecture</th><th>Cell</th><th>Test MAE</th><th>Test MSE</th><th>MAE ratio</th><th>MSE ratio</th></tr></thead><tbody>{finalJobs.flatMap((job) => job.summary.map((row) => <tr key={`${job.id}-${row.window}-${row.horizon}`}><td><strong>{job.status.architecture_name}</strong></td><td>w{row.window}/h{row.horizon}</td><td>{formatMetric(row.mae_mean, 5)}</td><td>{formatMetric(row.mse_mean, 5)}</td><td className={row.mae_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mae_ratio, 3)}</td><td className={row.mse_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mse_ratio, 3)}</td></tr>))}</tbody></table></div></section>}
@@ -698,7 +708,7 @@ export default function App() {
         <div className="local-badge"><span />Local workspace</div>
       </header>
       <div className="app-content">
-        {view === 'builder' && <BuilderView catalog={catalog.data} jobs={jobs.data ?? []} />}
+        <div hidden={view !== 'builder'}><BuilderView catalog={catalog.data} jobs={jobs.data ?? []} /></div>
         {view === 'runs' && <RunsView jobs={jobs.data ?? []} legacyRuns={legacyRuns.data ?? []} />}
         {view === 'compare' && <CompareView jobs={jobs.data ?? []} />}
       </div>

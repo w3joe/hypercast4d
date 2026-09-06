@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ArrowUpRight, Layers3, Search, BookOpen } from 'lucide-react'
 import type { Catalog } from './types'
 
 export default function MethodCollection({ catalog, onLoad }: {
@@ -16,25 +17,27 @@ export default function MethodCollection({ catalog, onLoad }: {
     (family === 'all' || method.family === family) &&
     (source === 'all' || method.sources.some((item) => item.source_id === source)) &&
     (!available || method.preset_id !== null))
-  return <details className="method-collection panel-surface">
-    <summary>Method collection <span>{collection.methods.length} methods from 3 papers</span></summary>
-    <p>Explore the cited methods. Runnable adaptations use this playground’s target and evaluation protocol; they are not published benchmark reproductions.</p>
+  const orderedMethods = [...methods].sort((a, b) => Number(Boolean(b.preset_id)) - Number(Boolean(a.preset_id)))
+  return <section className="method-collection" aria-label="Method collection">
+    <div className="library-intro"><BookOpen size={20} /><div><h2>Method collection</h2><p>{collection.methods.length} methods · {Object.keys(collection.sources).length} research papers · {collection.methods.filter((method) => method.preset_id).length} ready to try</p></div></div>
     <div className="method-filters">
-      <label>Search methods<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or architecture family" /></label>
+      <label className="method-search">Search methods<div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a model or architecture…" /></div></label>
       <label>Architecture family<select value={family} onChange={(event) => setFamily(event.target.value)}><option value="all">All families</option>{[...new Set(collection.methods.map((method) => method.family))].sort().map((item) => <option key={item}>{item}</option>)}</select></label>
       <label>Source paper<select value={source} onChange={(event) => setSource(event.target.value)}><option value="all">All papers</option>{Object.entries(collection.sources).map(([id, item]) => <option value={id} key={id}>{item.title}</option>)}</select></label>
       <label className="checkbox-row"><input type="checkbox" checked={available} onChange={(event) => setAvailable(event.target.checked)} />Runnable only</label>
     </div>
-    <p>{methods.length} matching methods</p>
-    <div className="method-grid">{methods.map((method) => <article className="method-card" key={method.id}>
-      <div><h3>{method.name}</h3><span>{method.family} · {method.kind === 'non-neural baseline' ? method.kind : method.status === 'adaptation' ? 'Runnable adaptation' : 'Reference only'}</span></div>
-      <p>{method.notes}</p>
+    <div className="library-results"><p>{methods.length} matching methods</p><span>Runnable methods first</span></div>
+    <div className="method-grid">{orderedMethods.map((method) => <article className={`method-card ${method.preset_id ? 'method-ready' : ''}`} key={method.id}>
+      <div className="method-card-top"><span className="method-icon"><Layers3 size={20} /></span><span className={`method-status ${method.preset_id ? 'ready' : ''}`}>{method.kind === 'non-neural baseline' ? 'Non-neural baseline' : method.preset_id ? 'Ready to try' : 'Paper reference'}</span></div>
+      <div><h3>{method.name}</h3><span className="method-family">{method.family}</span></div>
+      <p>{method.status === 'reference' && method.notes.startsWith('Listed for research') ? 'Explore the original paper for the architecture and evaluation. Training integration is not available yet.' : method.notes}</p>
       <div className="method-sources">{method.sources.map((reference) => {
         const paper = collection.sources[reference.source_id]
-        return <a key={reference.source_id} href={`${paper.url}#page=${reference.page}`} target="_blank" rel="noreferrer" title={paper.title}>{paper.venue} · p. {reference.page}</a>
+        return <a key={reference.source_id} href={`${paper.url}#page=${reference.page}`} target="_blank" rel="noreferrer" title={paper.title}>{paper.venue} · p. {reference.page}<ArrowUpRight size={13} /></a>
       })}</div>
-      {method.preset_id && <button className="secondary-button" onClick={() => onLoad(method.preset_id!)}>Load {method.name}</button>}
+      {method.preset_id && <button className="secondary-button" onClick={() => onLoad(method.preset_id!)}>Load {method.name}<ArrowUpRight size={15} /></button>}
     </article>)}</div>
     {!methods.length && <p>No methods match these filters.</p>}
-  </details>
+    <p className="library-footnote">Runnable adaptations use the playground’s evaluation protocol. They are not reproductions of published benchmarks.</p>
+  </section>
 }
