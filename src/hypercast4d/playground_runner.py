@@ -16,6 +16,14 @@ from torch.utils.data import TensorDataset
 
 from .architecture import build_architecture, normalize_architecture_spec
 from .data import MinMaxStats, load_paper_data, prepare_windows
+from .diagnostics import (
+    DIAGNOSTIC_COLUMNS,
+    append_predictions,
+    forecast_diagnostics,
+    initialize_diagnostics,
+    safe_ratio,
+    training_references,
+)
 from .models import parameter_count
 from .training import error_metrics, fit_model, predict, seed_everything
 
@@ -262,6 +270,8 @@ def _metrics_rows(
     seed: int,
     fold: int,
     split: str,
+    references: list[dict[str, Any]] | None = None,
+    origin: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metrics = error_metrics(prediction, target)
     persistence_metrics = error_metrics(persistence, target)
@@ -274,8 +284,8 @@ def _metrics_rows(
         **metrics,
         "persistence_mae": persistence_metrics["mae"],
         "persistence_mse": persistence_metrics["mse"],
-        "mae_ratio": metrics["mae"] / persistence_metrics["mae"],
-        "mse_ratio": metrics["mse"] / persistence_metrics["mse"],
+        "mae_ratio": safe_ratio(metrics["mae"], persistence_metrics["mae"]),
+        "mse_ratio": safe_ratio(metrics["mse"], persistence_metrics["mse"]),
     }
     per_lead: list[dict[str, Any]] = []
     for lead in range(horizon):
@@ -294,6 +304,13 @@ def _metrics_rows(
                 "persistence_mse": lead_persistence["mse"],
             }
         )
+    if references is not None:
+        diagnostics, lead_diagnostics = forecast_diagnostics(
+            prediction, target, persistence[:, 0] if origin is None else origin, references
+        )
+        aggregate.update(diagnostics)
+        for row, extra in zip(per_lead, lead_diagnostics):
+            row.update(extra)
     return aggregate, per_lead
 
 
@@ -309,9 +326,10 @@ def _summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         parameters=("parameters", "mean"),
         train_seconds=("train_seconds", "mean"),
         epochs_median=("epochs_ran", "median"),
+        **{key: (key, "mean") for key in DIAGNOSTIC_COLUMNS if key in frame},
     )
-    grouped["mae_ratio"] = grouped["mae_mean"] / grouped["persistence_mae"]
-    grouped["mse_ratio"] = grouped["mse_mean"] / grouped["persistence_mse"]
+    grouped["mae_ratio"] = grouped["mae_mean"] / grouped["persistence_mae"].replace(0, np.nan)
+    grouped["mse_ratio"] = grouped["mse_mean"] / grouped["persistence_mse"].replace(0, np.nan)
     return json.loads(grouped.to_json(orient="records"))
 
 
@@ -338,6 +356,7 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
     total = len(evaluation["cells"]) * len(evaluation["seeds"]) * len(evaluation["folds"])
     rows: list[dict[str, Any]] = []
     lead_rows: list[dict[str, Any]] = []
+    initialize_diagnostics(job_dir)
     _status(job_dir, state="running", completed=0, total=total, phase="validation")
     print(
         f"Validation started: {architecture['name']} · {total} fitted runs",
@@ -353,6 +372,7 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
                 fold["train_fraction"],
                 fold["validation_fraction"],
             )
+            references = training_references(frame.iloc[:prepared.train_end, 0].to_numpy(), horizon)
             for seed in evaluation["seeds"]:
                 print(
                     f"Training w{window}/h{horizon} fold {fold_index} seed {seed}",
@@ -415,6 +435,8 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
                     seed=seed,
                     fold=fold_index,
                     split="validation",
+                    references=references,
+                    origin=frame.iloc[prepared.validation.target_start - 1, 0].to_numpy(),
                 )
                 row.update(
                     {
@@ -426,6 +448,10 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
                         "validation_samples": len(prepared.validation.x),
                     }
                 )
+                append_predictions(
+                    job_dir, prediction, target, frame, prepared.validation.target_start, references,
+                    window=window, horizon=horizon, seed=seed, fold=fold_index, split="validation",
+                )
                 rows.append(row)
                 lead_rows.extend(leads)
                 _atomic_csv(job_dir / "runs.csv", rows)
@@ -433,7 +459,7 @@ def run_validation(job_dir: Path, request: dict[str, Any]) -> None:
                 _status(job_dir, completed=len(rows), total=total)
                 print(
                     f"  complete: MAE={row['mae']:.6g} MSE={row['mse']:.6g} "
-                    f"MAE ratio={row['mae_ratio']:.4f}",
+                    f"MAE ratio={row['mae_ratio']}",
                     flush=True,
                 )
     summary = _summary(rows)
@@ -485,6 +511,7 @@ def run_final_test(job_dir: Path, request: dict[str, Any]) -> None:
     total = len(evaluation["cells"]) * len(evaluation["seeds"])
     rows: list[dict[str, Any]] = []
     lead_rows: list[dict[str, Any]] = []
+    initialize_diagnostics(job_dir)
     _status(job_dir, state="running", completed=0, total=total, phase="final_test")
     print(
         f"Final test started: {architecture['name']} · {total} fitted runs",
@@ -501,6 +528,9 @@ def run_final_test(job_dir: Path, request: dict[str, Any]) -> None:
         train, test, test_x, test_y, scaler = _final_datasets(
             frame, window, horizon
         )
+        boundary = int(len(frame) * .85)
+        references = training_references(frame.iloc[:boundary, 0].to_numpy(), horizon)
+        target_start = np.arange(boundary, len(frame) - horizon + 1)
         for seed in evaluation["seeds"]:
             print(
                 f"Refitting w{window}/h{horizon} seed {seed} for "
@@ -555,6 +585,8 @@ def run_final_test(job_dir: Path, request: dict[str, Any]) -> None:
                 seed=seed,
                 fold=0,
                 split="test",
+                references=references,
+                origin=frame.iloc[target_start - 1, 0].to_numpy(),
             )
             row.update(
                 {
@@ -565,6 +597,10 @@ def run_final_test(job_dir: Path, request: dict[str, Any]) -> None:
                     "train_samples": len(train),
                     "validation_samples": 0,
                 }
+            )
+            append_predictions(
+                job_dir, prediction, target, frame, target_start, references,
+                window=window, horizon=horizon, seed=seed, fold=0, split="test",
             )
             rows.append(row)
             lead_rows.extend(leads)

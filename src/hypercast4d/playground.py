@@ -466,6 +466,17 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    @app.get("/api/v1/jobs/{job_id}/predictions.csv")
+    def download_predictions(job_id: str):
+        try:
+            manager.get_job(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="job not found") from error
+        path = manager.jobs_root / job_id / "predictions.csv"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="This run has no saved individual forecasts")
+        return FileResponse(path, media_type="text/csv", filename=f"{job_id}-predictions.csv")
+
     @app.get("/api/runs")
     def legacy_runs() -> list[dict[str, Any]]:
         # Use the same reader as the main dashboard so both leakage-safe

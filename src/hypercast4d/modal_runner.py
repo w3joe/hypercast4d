@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - exercised through capability checks
     modal = None
 
 
-RESULT_FILES = ("runs.csv", "per_lead.csv", "summary.json", "summary.csv")
+RESULT_FILES = ("runs.csv", "per_lead.csv", "summary.json", "summary.csv", "predictions.csv", "diagnostics.json")
 
 
 def _atomic_bytes(path: Path, contents: bytes) -> None:

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import MethodCollection from './MethodCollection'
+import ForecastDiagnostics from './ForecastDiagnostics'
 import {
   DndContext,
   DragEndEvent,
@@ -54,8 +55,6 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -662,13 +661,6 @@ function CompareView({ jobs }: { jobs: Job[] }) {
     mse: job.summary.reduce((sum, row) => sum + row.mse_ratio, 0) / job.summary.length,
     parameters: job.summary.reduce((sum, row) => sum + row.parameters, 0) / job.summary.length,
   }))
-  const leadSource = visible[0]
-  const leadData = leadSource ? [...new Set(leadSource.per_lead.map((row) => Number(row.lead)))].sort((a, b) => a - b).map((lead) => {
-    const rows = leadSource.per_lead.filter((row) => Number(row.lead) === lead)
-    const mae = rows.reduce((sum, row) => sum + Number(row.mae), 0) / rows.length
-    const baseline = rows.reduce((sum, row) => sum + Number(row.persistence_mae), 0) / rows.length
-    return { lead, mae, persistence: baseline }
-  }) : []
   const pareto = new Set(data.filter((candidate) => !data.some((other) => other.id !== candidate.id && other.mae <= candidate.mae && other.mse <= candidate.mse && (other.mae < candidate.mae || other.mse < candidate.mse))).map((item) => item.id))
   return (
     <section className="content-view">
@@ -680,10 +672,10 @@ function CompareView({ jobs }: { jobs: Job[] }) {
           <article className="chart-panel panel-surface"><h3>Error relative to persistence</h3><ResponsiveContainer width="100%" height={310}><BarChart data={data}><CartesianGrid stroke="#e0e5de" vertical={false} /><XAxis dataKey="name" stroke="#68736d" tick={{ fontSize: 11 }} /><YAxis stroke="#68736d" /><Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Legend /><Bar dataKey="mae" name="MAE ratio" fill="#287455" radius={[4, 4, 0, 0]} /><Bar dataKey="mse" name="MSE ratio" fill="#477cb2" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></article>
           <article className="chart-panel panel-surface"><h3>Accuracy–parameter trade-off</h3><ResponsiveContainer width="100%" height={310}><ScatterChart><CartesianGrid stroke="#e0e5de" /><XAxis type="number" dataKey="parameters" name="Parameters" stroke="#68736d" /><YAxis type="number" dataKey="mae" name="MAE ratio" stroke="#68736d" /><Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Scatter data={data} fill="#b58e3d" /></ScatterChart></ResponsiveContainer></article>
         </div>
-        {leadSource && leadData.length > 0 && <article className="chart-panel panel-surface lead-chart"><h3>Per-lead MAE · {leadSource.status.architecture_name}</h3><ResponsiveContainer width="100%" height={250}><LineChart data={leadData}><CartesianGrid stroke="#e0e5de" vertical={false} /><XAxis dataKey="lead" stroke="#68736d" label={{ value: 'Forecast lead', position: 'insideBottom', offset: -2 }} /><YAxis stroke="#68736d" /><Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e0e5de' }} /><Legend /><Line type="monotone" dataKey="mae" name="Architecture MAE" stroke="#287455" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="persistence" name="Persistence MAE" stroke="#477cb2" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></article>}
+        <ForecastDiagnostics jobs={visible} />
         <div className="comparison-table panel-surface"><table><thead><tr><th>Architecture</th><th>Preset</th><th>MAE ratio</th><th>MSE ratio</th><th>Parameters</th><th>Selection</th><th /></tr></thead><tbody>{visible.map((job) => { const row = data.find((item) => item.id === job.id)!; return <tr key={job.id}><td><strong>{row.name}</strong></td><td>{job.status.preset}</td><td className={row.mae < 1 ? 'metric-good' : ''}>{formatMetric(row.mae, 3)}</td><td className={row.mse < 1 ? 'metric-good' : ''}>{formatMetric(row.mse, 3)}</td><td>{Math.round(row.parameters).toLocaleString()}</td><td>{pareto.has(job.id) ? <span className="pareto-badge">Pareto best</span> : 'Dominated'}</td><td><FinalTestDialog job={job} onComplete={() => queryClient.invalidateQueries({ queryKey: ['jobs'] })} /></td></tr> })}</tbody></table></div>
       </>}
-      {finalJobs.length > 0 && <section className="final-results panel-surface"><div className="panel-title"><LockKeyhole size={17} /><span>Held-out final tests</span></div><p className="muted-copy">These results are separated from architecture selection and cannot be rerun for the same candidate configuration.</p><div className="comparison-table"><table><thead><tr><th>Architecture</th><th>Cell</th><th>Test MAE</th><th>Test MSE</th><th>MAE ratio</th><th>MSE ratio</th></tr></thead><tbody>{finalJobs.flatMap((job) => job.summary.map((row) => <tr key={`${job.id}-${row.window}-${row.horizon}`}><td><strong>{job.status.architecture_name}</strong></td><td>w{row.window}/h{row.horizon}</td><td>{formatMetric(row.mae_mean, 5)}</td><td>{formatMetric(row.mse_mean, 5)}</td><td className={row.mae_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mae_ratio, 3)}</td><td className={row.mse_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mse_ratio, 3)}</td></tr>))}</tbody></table></div></section>}
+      {finalJobs.length > 0 && <section className="final-results panel-surface"><div className="panel-title"><LockKeyhole size={17} /><span>Held-out final tests</span></div><p className="muted-copy">These results are separated from architecture selection and cannot be rerun for the same candidate configuration.</p><ForecastDiagnostics jobs={finalJobs} /><div className="comparison-table"><table><thead><tr><th>Architecture</th><th>Cell</th><th>Test MAE</th><th>Test MSE</th><th>MAE ratio</th><th>MSE ratio</th></tr></thead><tbody>{finalJobs.flatMap((job) => job.summary.map((row) => <tr key={`${job.id}-${row.window}-${row.horizon}`}><td><strong>{job.status.architecture_name}</strong></td><td>w{row.window}/h{row.horizon}</td><td>{formatMetric(row.mae_mean, 5)}</td><td>{formatMetric(row.mse_mean, 5)}</td><td className={row.mae_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mae_ratio, 3)}</td><td className={row.mse_ratio < 1 ? 'metric-good' : ''}>{formatMetric(row.mse_ratio, 3)}</td></tr>))}</tbody></table></div></section>}
     </section>
   )
 }

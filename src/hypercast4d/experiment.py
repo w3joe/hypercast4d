@@ -22,6 +22,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .data import load_paper_data, prepare_windows
 from .models import build_model, parameter_count
+from .diagnostics import (
+    DIAGNOSTIC_COLUMNS,
+    append_predictions,
+    forecast_diagnostics,
+    initialize_diagnostics,
+    training_references,
+)
 from .training import error_metrics, fit_model, predict, seed_everything
 
 
@@ -50,6 +57,7 @@ RESULT_COLUMNS = (
     "train_samples",
     "validation_samples",
     "test_samples",
+    *DIAGNOSTIC_COLUMNS,
 )
 
 
@@ -291,6 +299,8 @@ def run(
         raise ValueError("tensorboard.flush_seconds must be positive")
     device = _device(training_config["device"])
     rows: list[dict[str, Any]] = []
+    initialize_diagnostics(output)
+    lead_rows: list[dict[str, Any]] = []
     results_path = output / "runs.csv"
     status_path = output / "status.json"
     started = datetime.now(UTC)
@@ -327,6 +337,8 @@ def run(
         test_data = prepared.test.as_dataset()
         target_scaled = prepared.test.y
         target = prepared.scaler.inverse_target(target_scaled)
+        references = training_references(frame.iloc[:prepared.train_end, 0].to_numpy(), horizon)
+        origin = frame.iloc[prepared.test.target_start - 1, 0].to_numpy()
 
         for seed in seeds:
             for name in model_names:
@@ -424,6 +436,22 @@ def run(
                     validation_loss = fitted.best_validation_loss
                 prediction = prepared.scaler.inverse_target(prediction_scaled)
                 metrics = error_metrics(prediction, target)
+                diagnostics, leads = forecast_diagnostics(prediction, target, origin, references)
+                metrics.update(diagnostics)
+                for lead in leads:
+                    j = lead["lead"] - 1
+                    lead_rows.append({
+                        "window": window, "horizon": horizon, "model": name,
+                        "seed": int(seed), "fold": 0, "split": "test", **lead,
+                        **error_metrics(prediction[:, j], target[:, j]),
+                        "persistence_mae": float(np.mean(np.abs(origin - target[:, j]))),
+                        "persistence_mse": float(np.mean((origin - target[:, j]) ** 2)),
+                    })
+                pd.DataFrame(lead_rows).to_csv(output / "per_lead.csv", index=False)
+                append_predictions(
+                    output, prediction, target, frame, prepared.test.target_start, references,
+                    window=window, horizon=horizon, model=name, seed=int(seed), fold=0, split="test",
+                )
                 if writer is not None:
                     _log_tensorboard_result(
                         writer,
@@ -480,6 +508,7 @@ def run(
             parameters_mean=("parameters", "mean"),
             train_seconds_mean=("train_seconds", "mean"),
             process_peak_rss_mb_mean=("process_peak_rss_mb", "mean"),
+            **{key: (key, "mean") for key in DIAGNOSTIC_COLUMNS},
         )
         .sort_values(["window", "horizon", "mae_mean"])
     )

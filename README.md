@@ -329,6 +329,47 @@ cross-validation MAE among the candidates completed so far. The table identifies
 the candidate number and MAE standard deviation rather than an evaluation seed
 and test MSE.
 
+## Forecast diagnostics
+
+New practical evaluation and playground runs save five additional diagnostics:
+
+- direction accuracy, compared with the most frequent training direction;
+- Pearson correlation of predicted and actual returns from the forecast origin;
+- signed forecast bias (`prediction - actual`);
+- the 95th percentile of absolute forecast errors;
+- MAE during large moves, its persistence ratio, and the qualifying sample count.
+
+The **Compare** view charts all selected architectures by forecast lead. Select
+an evaluation cell to keep different windows, horizons, datasets and split
+protocols separate. Final-test charts remain in the held-out section. The score
+table includes sample counts, threshold ranges and a **Download CSV** link.
+Existing runs without the new fields show an explanation; their scores are not
+backfilled from aggregate errors.
+
+Returns are `(value - origin_price) / origin_price`, requiring a positive origin
+price. Direction has three classes (down, flat, up), with absolute returns at
+most `1e-6` treated as flat to avoid floating-point noise. The baseline chooses
+the most frequent direction among training h-step returns; ties choose the
+smallest label (-1, 0, 1). Correlation is undefined with fewer than two valid
+pairs or a return spread at most `1e-6` in either series.
+
+A large move strictly exceeds the **90th percentile of absolute h-step training
+returns**. Each lead and fold has its own threshold, fitted only on training
+rows. Final-test references use the refitting partition (the first 85%). Empty
+large-move subsets, zero baseline denominators and undefined correlations are
+reported as null/blank, not zero.
+
+`per_lead.csv` contains each seed/fold's scores. Charts average defined scores
+across runs, including percentiles and correlations; they are not pooled
+estimates. Run-level diagnostics average leads and sum sample counts. Repeated
+seeds and overlapping horizons do not create independent observations.
+
+`predictions.csv` stores forecast origin/date, target date, lead, original price,
+actual, prediction, persistence, returns, training threshold and baseline, with
+window/horizon/seed/fold/split identifiers (and model for the main CLI).
+`diagnostics.json` records definitions and aggregation rules. Both files also
+return from Modal jobs. The archived notebook reproduction remains unchanged.
+
 ## TensorBoard training diagnostics
 
 TensorBoard logging is enabled in the default configuration. Every invocation
