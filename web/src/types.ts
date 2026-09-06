@@ -29,6 +29,7 @@ export type CatalogLayer = {
 }
 
 export type Catalog = {
+  method_collection?: MethodCollection
   schema_version: number
   categories: { name: string; layers: CatalogLayer[] }[]
   input_representations: string[]
@@ -38,6 +39,20 @@ export type Catalog = {
   presets: ArchitectureSpec[]
   evaluation_presets: Record<string, EvaluationPreset>
   evaluation_defaults: EvaluationDefaults
+}
+
+export type MethodCollection = {
+  sources: Record<string, { title: string; venue: string; url: string; pages: string }>
+  methods: {
+    id: string
+    name: string
+    family: string
+    kind: string
+    status: 'reference' | 'adaptation'
+    preset_id: string | null
+    sources: { source_id: string; page: number }[]
+    notes: string
+  }[]
 }
 
 export type EvaluationCell = { window: number; horizon: number }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import MethodCollection from './MethodCollection'
 import {
   DndContext,
   DragEndEvent,
@@ -553,6 +554,8 @@ function BuilderView({ catalog, jobs }: { catalog: Catalog; jobs: Job[] }) {
         </div>
       </section>
       <ErrorNotice error={importError || validation.error || saveMutation.error} />
+      <MethodCollection catalog={catalog} onLoad={loadPreset} />
+      {catalog.method_collection?.methods.filter((method) => method.preset_id === architecture.preset_id).map((method) => <p className="muted-copy" key={method.id}>{method.notes} Use this complete forecaster as the only pipeline block, with levels input and a direct head.</p>)}
       {queuedMessage && <div className="success-notice"><Check size={15} />{queuedMessage} Track it in Runs.</div>}
       <section className="builder-grid">
         <aside className="palette panel-surface">

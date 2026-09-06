@@ -249,3 +249,17 @@ th, td { padding: 11px 8px; border-bottom: 1px solid #21354e; }
   .run-controls { grid-template-columns: 1fr; }
   .run-select, .gpu-select { min-width: 0; }
 }
+.method-collection { margin: 16px 0; padding: 18px; }
+.method-collection summary { cursor: pointer; font-weight: 600; }
+.method-collection summary span { margin-left: 12px; font-weight: 400; color: var(--muted); }
+.method-collection p { font-size: 13px; line-height: 1.5; }
+.method-filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
+.method-filters label { display: grid; gap: 6px; max-width: 100%; font-size: 12px; }
+.method-filters select { max-width: 360px; width: 100%; }
+.method-filters .checkbox-row { display: flex; }
+.method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; max-height: 620px; overflow: auto; }
+.method-card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.method-card h3 { margin: 0 0 5px; }
+.method-card span, .method-sources { font-size: 12px; }
+.method-sources { display: grid; gap: 6px; margin-top: auto; }
+.method-card button { align-self: start; }

@@ -30,6 +30,7 @@ from .architecture import (
     validate_architecture,
 )
 from .compute import modal_capability, normalize_execution
+from .method_collection import method_collection
 from .playground_runner import (
     EVALUATION_DEFAULTS,
     EVALUATION_PRESETS,
@@ -380,6 +381,7 @@ def create_app(
         return {
             **layer_catalog(),
             "presets": presets(),
+            "method_collection": method_collection(),
             "evaluation_presets": EVALUATION_PRESETS,
             "evaluation_defaults": EVALUATION_DEFAULTS,
         }

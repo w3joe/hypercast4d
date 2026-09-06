@@ -1,5 +1,9 @@
 # HyperCast4D
 
+The architecture playground includes a [paper-linked method collection](docs/method_collection.md)
+with 52 entries and runnable DLinear, PatchTST and iTransformer adaptations.
+Find it under **Builder → Method collection**.
+
 HyperCast4D is a runnable, clean-room evaluation of the paper
 [*4D hypercomplex-valued neural network in multivariate time series
 forecasting*](https://doi.org/10.1038/s41598-025-08957-5).

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 
@@ -129,6 +130,7 @@ def test_playground_api_exposes_catalog_validation_and_saved_architectures(
         assert client.get("/health").json() == {"ok": True}
         catalog = client.get("/api/v1/catalog")
         assert catalog.status_code == 200
+        assert len(catalog.json()["method_collection"]["methods"]) == 52
         assert any(item["type"] == "tcn" for group in catalog.json()["categories"] for item in group["layers"])
 
         response = client.post(
@@ -183,8 +185,9 @@ def test_playground_reads_main_reproduction_results(tmp_path: Path) -> None:
         assert rows[0]["mae"] == 0.06
 
 
+@pytest.mark.parametrize("preset_id", ["residual-tcn", "research-dlinear", "research-patchtst", "research-itransformer"])
 def test_worker_completes_a_real_validation_job(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, preset_id: str
 ) -> None:
     data_directory = tmp_path / "data" / "raw"
     data_directory.mkdir(parents=True)
@@ -198,7 +201,7 @@ def test_worker_completes_a_real_validation_job(
     job_dir.mkdir()
     request = {
         "phase": "validation",
-        "architecture": _preset("residual-tcn"),
+        "architecture": _preset(preset_id),
         "evaluation": {
             "preset": "quick",
             "data_path": "data/raw/paper_data.xlsx",

@@ -14,6 +14,7 @@ from torch import nn
 from .algebras import COMPONENT_COUNT
 from .layers import HyperDense
 from .models import CausalConv1d, parameter_count
+from .research_models import AttentionForecast, DLinear
 
 
 SCHEMA_VERSION = 1
@@ -21,6 +22,7 @@ ALGEBRAS = ("quaternion", "coquaternion", "cl11")
 ACTIVATIONS = ("relu", "gelu", "silu", "tanh", "linear")
 INPUT_REPRESENTATIONS = ("levels", "centered", "differences")
 HEAD_TYPES = ("direct", "persistence_residual", "cumulative_residual")
+RESEARCH_MODELS = {"dlinear", "patchtst", "itransformer"}
 
 
 class ArchitectureError(ValueError):
@@ -136,6 +138,14 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
     zero_default = head_type != "direct"
     zero_initialize = bool(head_raw.get("zero_initialize", zero_default))
 
+    if any(layer["type"] in RESEARCH_MODELS for layer in layers):
+        if len(layers) != 1:
+            raise ArchitectureError("Research forecasters must be the only block in the pipeline")
+        if representation != "levels" or feature_order[0] != 0:
+            raise ArchitectureError("Research forecasters require levels and target feature 0 first")
+        if head_type != "direct" or zero_initialize:
+            raise ArchitectureError("Research forecasters require a direct, non-zero-initialized head")
+
     return {
         "schema_version": SCHEMA_VERSION,
         "name": name,
@@ -149,6 +159,26 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_layer_params(layer_type: str, params: dict[str, Any]) -> dict[str, Any]:
+    if layer_type == "dlinear":
+        kernel = _bounded_int(params.get("kernel_size", 25), "kernel_size", 1, 101)
+        if kernel % 2 == 0:
+            raise ArchitectureError("DLinear kernel_size must be odd")
+        return {"kernel_size": kernel}
+    if layer_type in {"patchtst", "itransformer"}:
+        normalized = {
+            "d_model": _bounded_int(params.get("d_model", 32), "d_model", 4, 256),
+            "n_heads": _bounded_int(params.get("n_heads", 4), "n_heads", 1, 16),
+            "num_layers": _bounded_int(params.get("num_layers", 2), "num_layers", 1, 4),
+            "dropout": _bounded_float(params.get("dropout", 0.1), "dropout", 0, 0.95),
+        }
+        if normalized["d_model"] % normalized["n_heads"]:
+            raise ArchitectureError("d_model must be divisible by n_heads")
+        if layer_type == "patchtst":
+            normalized["patch_size"] = _bounded_int(params.get("patch_size", 4), "patch_size", 1, 128)
+            normalized["stride"] = _bounded_int(params.get("stride", 2), "stride", 1, 128)
+            if normalized["stride"] > normalized["patch_size"]:
+                raise ArchitectureError("PatchTST stride must not exceed patch_size")
+        return normalized
     if layer_type == "dense":
         return {"units": _bounded_int(params.get("units", 32), "units", 1, 512)}
     if layer_type == "hyper_dense":
@@ -460,6 +490,20 @@ class ExperimentalForecaster(nn.Module):
             raise ArchitectureError("feature_order references an unavailable feature")
         steps = window - 1 if self.representation == "differences" else window
         shape = TensorShape("sequence", len(self.feature_order), steps)
+        if self.spec["layers"] and self.spec["layers"][0]["type"] in RESEARCH_MODELS:
+            layer = self.spec["layers"][0]
+            kind = layer["type"]
+            module = (DLinear(window, horizon, **layer["params"]) if kind == "dlinear"
+                      else AttentionForecast(kind, window, horizon, **layer["params"]))
+            self.layers = nn.ModuleList([module])
+            self.output = nn.Identity()
+            self.head_type = "direct"
+            self.output_shape = TensorShape("vector", horizon)
+            self.receptive_field = window
+            self._reset_initialization()
+            self.trace = [TraceEntry(layer["id"], kind, shape.label(),
+                                     self.output_shape.label(), parameter_count(module), window)]
+            return
         modules: list[nn.Module] = []
         self.trace: list[TraceEntry] = []
         receptive_field = 1
@@ -576,6 +620,7 @@ def architecture_hash(spec: dict[str, Any], evaluation: dict[str, Any] | None = 
 
 
 LAYER_TYPES = {
+    *RESEARCH_MODELS,
     "dense",
     "hyper_dense",
     "causal_conv",
@@ -768,4 +813,12 @@ def presets() -> list[dict[str, Any]]:
             | {"locked": False, "preset_id": "quaternion-gru-residual"},
         ]
     )
+    for kind, title in (("dlinear", "DLinear"), ("patchtst", "PatchTST"),
+                        ("itransformer", "iTransformer")):
+        output.append(normalize_architecture_spec({
+            "name": f"{title} (playground adaptation)",
+            "input": common_input,
+            "layers": [_layer("forecaster", kind)],
+            "head": {"type": "direct", "zero_initialize": False},
+        }) | {"locked": False, "preset_id": f"research-{kind}"})
     return copy.deepcopy(output)
