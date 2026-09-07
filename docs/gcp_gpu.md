@@ -4,15 +4,15 @@ Choose **Run on → GCP · GPU VM**, then GPU and count. Local and Modal remain 
 
 | GPU | Counts | Machine types |
 | --- | --- | --- |
-| L4 (24 GB per GPU) | 1, 2, 4, 8 | g2-standard-4 / 24 / 48 / 96 |
-| A100 (40 GB per GPU) | 1, 2, 4, 8, 16 | a2-highgpu-1g / 2g / 4g / 8g; a2-megagpu-16g |
+| L4 (24 GB per GPU) | 1, 2, 4, 8, 16 | g2-standard-4 / 24 / 48 / 96; 16 uses two g2-standard-96 VMs |
+| A100 (40 GB per GPU) | 1, 2, 4, 8 | a2-highgpu-1g / 2g / 4g / 8g |
 
 Mappings follow [Google's accelerator-optimized machine table](https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines).
-Capacity, region support, quotas and pricing vary. Selecting a count provisions **one VM with that many GPUs**, not multiple VMs.
+Capacity, region support, quotas and pricing vary. Counts up to eight provision one VM. **16 L4s provisions two VMs with eight L4s each**, in the configured zone. Both VMs and their boot disks are billed. A100 selections are capped at eight, including API submissions.
 
 ## Multi-GPU semantics
 
-Cell/seed trials run concurrently in separate processes, each pinned to one GPU with `CUDA_VISIBLE_DEVICES`. Folds remain sequential within each trial. Results are merged into the existing CSV, summary and forecast-diagnostics formats. Final-test refits use the original validation runs for epoch selection.
+Cell/seed trials run concurrently in separate processes, each pinned to one GPU with `CUDA_VISIBLE_DEVICES`. For 16 L4s, alternating trials go to the two VMs, without duplication. Folds remain sequential within each trial. Results from both VMs are merged into the existing CSV, summary and forecast-diagnostics formats. Final-test refits use the original validation runs for epoch selection. If one VM fails, the job fails and cleanup is attempted for both; partial results never unlock final tests.
 
 This is experiment parallelism, **not** distributed training or pooled GPU memory. A single model must fit on one GPU. Quick's default single cell/seed only uses one GPU; selecting more still bills the whole VM. Use multiple seeds/cells to utilise more GPUs. No live per-epoch progress is streamed yet; logs/results download on completion.
 
@@ -44,9 +44,9 @@ The runtime limit defaults to 6 hours and accepts 1–24. “Configured” check
 
 ## Costs, data and cleanup
 
-Pressing Run uploads the package's Python source, selected dataset, request, and (for final tests) parent validation CSV to a random job-specific bucket prefix. It creates one on-demand GPU VM with a 100 GB auto-delete boot disk. These resources and data transfers incur charges.
+Pressing Run uploads the package's Python source, selected dataset, request, and (for final tests) parent validation CSV to a random job-specific bucket prefix. It creates one on-demand GPU VM (two for 16 L4s), each with a 100 GB auto-delete boot disk. Both VMs receive the dataset. These resources and data transfers incur charges.
 
-On completion, failure or cancellation the local controller attempts to delete that VM and its exact storage prefix. Cleanup warnings are persisted in job status and shown in Runs. Requests never delete the bucket, network, image or unrelated VMs.
+On completion, failure or cancellation the local controller attempts to delete every attempted VM and the exact job storage prefix. The `gcp_instances` status field records all VM names; each VM has its own runtime-limit safeguard. Cleanup warnings are persisted in job status and shown in Runs. Requests never delete the bucket, network, image or unrelated VMs.
 
 A provider-side [maximum runtime with DELETE action](https://docs.cloud.google.com/compute/docs/instances/limit-vm-runtime) is the fallback if the local process disappears. This is not a billing guarantee: quota, provider failures, manual stops and lost permissions can prevent cleanup. Do not manually stop/restart these VMs; stopping resets scheduling semantics. Configure a bucket lifecycle policy for old `hypercast4d/` objects, billing alerts, and monitor resources labelled `app=hypercast4d`. A killed controller cannot clean its storage prefix automatically; consult `gcp_instance`, `gcp_project`, `gcp_zone`, `gcp_prefix` and `gcp_cleanup` in persisted status. Bucket soft-delete/versioning/retention may retain billed copies after deletion.
 

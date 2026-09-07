@@ -13,10 +13,12 @@ from .playground_runner import _atomic_csv, _atomic_json, _status, _summary, nor
 from .diagnostics import initialize_diagnostics
 
 
-def trial_requests(request: dict) -> list[dict]:
+def trial_requests(request: dict, shard_index: int = 0, shard_count: int = 1) -> list[dict]:
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("Invalid VM shard")
     evaluation = normalize_evaluation(request["evaluation"])
     return [{**request, "evaluation": {**evaluation, "cells": [cell], "seeds": [seed]}}
-            for cell in evaluation["cells"] for seed in evaluation["seeds"]]
+            for cell in evaluation["cells"] for seed in evaluation["seeds"]][shard_index::shard_count]
 
 
 def merge_trials(job_dir: Path, directories: list[Path]) -> None:
@@ -34,12 +36,19 @@ def merge_trials(job_dir: Path, directories: list[Path]) -> None:
     _status(job_dir, state="complete", completed=len(rows), total=len(rows), current=None)
 
 
-def run_gpu_trials(job_dir: Path, gpu_count: int) -> None:
+def run_gpu_trials(job_dir: Path, gpu_count: int, shard_index: int = 0, shard_count: int = 1) -> None:
     import torch
     if torch.cuda.device_count() < gpu_count:
         raise RuntimeError(f"Requested {gpu_count} GPUs; CUDA sees {torch.cuda.device_count()}")
     request = json.loads((job_dir / "request.json").read_text())
-    trials = trial_requests(request)
+    trials = trial_requests(request, shard_index, shard_count)
+    if not trials:
+        initialize_diagnostics(job_dir)
+        for filename in ("runs.csv", "per_lead.csv", "summary.csv", "training.log"):
+            (job_dir / filename).write_text("")
+        _atomic_json(job_dir / "summary.json", [])
+        _status(job_dir, state="complete", completed=0, total=0, current=None)
+        return
     directories = []
     for index, trial in enumerate(trials):
         path = job_dir / f"trial-{index}"
@@ -72,9 +81,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--job-dir", type=Path, required=True)
     parser.add_argument("--gpu-count", type=int, required=True)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()
     try:
-        run_gpu_trials(args.job_dir.resolve(), args.gpu_count)
+        run_gpu_trials(args.job_dir.resolve(), args.gpu_count, args.shard_index, args.shard_count)
     except BaseException as error:
         _status(args.job_dir, state="failed", error=str(error))
         raise

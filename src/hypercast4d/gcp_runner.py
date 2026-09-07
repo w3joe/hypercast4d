@@ -45,7 +45,7 @@ def package_job(job_dir: Path, destination: Path) -> None:
         archive.writestr("job/request.json", json.dumps(request))
 
 
-def startup_script(prefix: str, count: int) -> str:
+def startup_script(prefix: str, count: int, shard_index: int = 0, shard_count: int = 1) -> str:
     # All configuration is server-owned; quote even validated values.
     prefix = shlex.quote(prefix)
     return f'''#!/bin/bash
@@ -73,7 +73,7 @@ trap finish EXIT
 exec > >(tee /opt/hypercast-job/job/bootstrap.log) 2>&1
 gcloud storage cp {prefix}/payload.zip payload.zip
 python3 -m zipfile -e payload.zip .
-python3 -m hypercast4d.gcp_worker --job-dir /opt/hypercast-job/job --gpu-count {count}
+python3 -m hypercast4d.gcp_worker --job-dir /opt/hypercast-job/job --gpu-count {count} --shard-index {shard_index} --shard-count {shard_count}
 '''
 
 
@@ -117,39 +117,59 @@ def run_gcp_job(job_dir: Path) -> None:
         raise ValueError("Expected a GCP job")
     name = "hypercast-" + uuid.uuid4().hex[:24]
     prefix = f"gs://{config['bucket']}/hypercast4d/{name}"
+    vm_count = execution.get("vm_count", 1)
+    names = [name] if vm_count == 1 else [f"{name}-{index}" for index in range(vm_count)]
+    prefixes = [prefix] if vm_count == 1 else [f"{prefix}/vm-{index}" for index in range(vm_count)]
     scope = [f"--project={config['project']}", f"--zone={config['zone']}"]
-    _status(job_dir, state="starting", gcp_instance=name, gcp_project=config["project"],
-            gcp_zone=config["zone"], gcp_prefix=prefix, gpu_count=execution["gpu_count"])
+    _status(job_dir, state="starting", gcp_instance=names[0], gcp_project=config["project"],
+            gcp_zone=config["zone"], gcp_prefix=prefix, gpu_count=execution["gpu_count"], gcp_instances=names)
 
     def cancel(signum, frame):
         raise SystemExit(130)
 
     previous = {sig: signal.signal(sig, cancel) for sig in (signal.SIGTERM, signal.SIGINT)}
-    attempted = False
+    attempted = []
     uploaded = False
     try:
         with tempfile.TemporaryDirectory(prefix="hypercast-gcp-") as temporary:
             directory = Path(temporary)
             package_job(job_dir, directory / "payload.zip")
-            # Generated runtime artifact, not a source edit.
-            (directory / "startup.sh").write_text(startup_script(prefix, execution["gpu_count"]))
-            uploaded = True
-            cloud("storage", "cp", str(directory / "payload.zip"), prefix + "/payload.zip", timeout=600)
-            attempted = True
-            cloud(*create_arguments(config, name, execution["machine_type"], directory / "startup.sh"), timeout=300)
-            print(f"GCP VM {name}: startup / training; results and logs download when finished", flush=True)
+            for index, vm_name in enumerate(names):
+                script = directory / f"startup-{index}.sh"
+                script.write_text(startup_script(prefixes[index], execution.get("gpus_per_vm", execution["gpu_count"]), index, vm_count))
+                uploaded = True
+                cloud("storage", "cp", str(directory / "payload.zip"), prefixes[index] + "/payload.zip", timeout=600)
+                attempted.append(vm_name)
+                cloud(*create_arguments(config, vm_name, execution["machine_type"], script), timeout=300)
+                print(f"GCP VM {vm_name}: startup / training; results and logs download when finished", flush=True)
             _status(job_dir, state="running", current=None)
             deadline = time.monotonic() + int(config["max_hours"]) * 3600
+            completed = {}
             while time.monotonic() < deadline:
-                result = cloud("storage", "cp", prefix + "/result.zip", str(directory / "result.zip"),
-                               check=False, timeout=120)
-                if result.returncode == 0:
-                    collect_result(directory / "result.zip", job_dir)
+                for index, vm_name in enumerate(names):
+                    if index in completed:
+                        continue
+                    archive = directory / f"result-{index}.zip"
+                    result = cloud("storage", "cp", prefixes[index] + "/result.zip", str(archive),
+                                   check=False, timeout=120)
+                    if result.returncode == 0:
+                        destination = job_dir if vm_count == 1 else directory / f"vm-{index}"
+                        destination.mkdir(exist_ok=True)
+                        print(f"Collecting results from {vm_name}", flush=True)
+                        collect_result(archive, destination)
+                        completed[index] = destination
+                        continue
+                    vm = cloud("compute", "instances", "describe", vm_name, *scope,
+                               "--format=value(status)", check=False)
+                    if vm.returncode != 0 or vm.stdout.strip() == "TERMINATED":
+                        raise RuntimeError(f"GCP VM {vm_name} stopped or is unavailable before results arrived; check VM serial logs and IAM")
+                if len(completed) == vm_count:
+                    if vm_count > 1:
+                        from .gcp_worker import merge_trials
+                        nonempty = [completed[index] for index in range(vm_count)
+                                    if json.loads((completed[index] / "status.json").read_text()).get("completed", 0) > 0]
+                        merge_trials(job_dir, nonempty)
                     return
-                vm = cloud("compute", "instances", "describe", name, *scope,
-                           "--format=value(status)", check=False)
-                if vm.returncode != 0 or vm.stdout.strip() == "TERMINATED":
-                    raise RuntimeError("GCP VM stopped or is unavailable before results arrived; check VM serial logs and IAM")
                 time.sleep(10)
             raise TimeoutError("GCP job exceeded its configured runtime limit")
     except SystemExit:
@@ -162,13 +182,13 @@ def run_gcp_job(job_dir: Path) -> None:
         for sig in previous:
             signal.signal(sig, signal.SIG_IGN)
         errors = []
-        if attempted:
+        for vm_name in attempted:
             try:
-                result = cloud("compute", "instances", "delete", name, *scope, check=False)
+                result = cloud("compute", "instances", "delete", vm_name, *scope, check=False)
                 if result.returncode and "not found" not in result.stderr.lower():
-                    errors.append(f"Check VM {name}: {result.stderr.strip()}")
+                    errors.append(f"Check VM {vm_name}: {result.stderr.strip()}")
             except (OSError, subprocess.SubprocessError) as error:
-                errors.append(f"Check VM {name}: {error}")
+                errors.append(f"Check VM {vm_name}: {error}")
         if uploaded:
             try:
                 result = cloud("storage", "rm", "--recursive", prefix + "/", check=False)

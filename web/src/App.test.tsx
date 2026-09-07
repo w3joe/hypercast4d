@@ -59,8 +59,8 @@ beforeEach(() => {
     } : path.includes('compute') ? {
       local: { available: true },
       gcp: { available: true, message: 'Configured · test-zone', gpus: [
-        { id: 'L4', label: 'L4', counts: [1, 2, 4, 8] },
-        { id: 'A100-40GB', label: 'A100 40 GB', counts: [1, 2, 4, 8, 16] },
+        { id: 'L4', label: 'L4', counts: [1, 2, 4, 8, 16] },
+        { id: 'A100-40GB', label: 'A100 40 GB', counts: [1, 2, 4, 8] },
       ] },
       modal: {
         available: true,
@@ -254,12 +254,12 @@ describe('graph-native playground', () => {
     const gpu = await screen.findByRole('combobox', { name: 'GCP GPU' })
     const count = screen.getByRole('combobox', { name: 'GCP GPU count' })
     expect(gpu).toHaveValue('L4')
-    expect(count.querySelectorAll('option')).toHaveLength(4)
-    fireEvent.change(gpu, { target: { value: 'A100-40GB' } })
     expect(count.querySelectorAll('option')).toHaveLength(5)
     fireEvent.change(count, { target: { value: '16' } })
     expect(count).toHaveValue('16')
-    fireEvent.change(gpu, { target: { value: 'L4' } })
+    expect(screen.getByRole('option', { name: '16 × GPU · 2 VMs' })).toBeInTheDocument()
+    fireEvent.change(gpu, { target: { value: 'A100-40GB' } })
+    expect(count.querySelectorAll('option')).toHaveLength(4)
     expect(count).toHaveValue('1')
     await waitFor(() => expect(screen.getByRole('button', { name: /run validation/i })).toBeEnabled())
     expect(screen.getByText(/Billed VM/)).toBeInTheDocument()

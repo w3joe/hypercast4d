@@ -24,7 +24,7 @@ def test_machine_mapping(gpu, count, machine):
     }
 
 
-@pytest.mark.parametrize('gpu,count', [('L4', 16), ('L4', 3), ('L4', True), ('L4', '2'), ('L4', 2.0), ('A100-80GB', 1)])
+@pytest.mark.parametrize('gpu,count', [('A100-40GB', 16), ('L4', 32), ('L4', 3), ('L4', True), ('L4', '2'), ('L4', 2.0), ('A100-80GB', 1)])
 def test_invalid_hardware(gpu, count):
     with pytest.raises(ValueError):
         normalize_execution({'target': 'gcp', 'gpu': gpu, 'gpu_count': count})
@@ -222,3 +222,73 @@ def test_submit_gcp_requires_configuration(tmp_path, monkeypatch):
     manager = JobManager(tmp_path / 'results', tmp_path)
     with pytest.raises(ValueError, match='Setup needed'):
         manager.submit_validation(presets()[0], {}, {'target': 'gcp'})
+
+
+def test_l4_16_uses_two_real_eight_gpu_machines():
+    execution = normalize_execution({'target': 'gcp', 'gpu': 'L4', 'gpu_count': 16, 'vm_count': 99})
+    assert execution == {'target': 'gcp', 'gpu': 'L4', 'gpu_count': 16,
+                         'machine_type': 'g2-standard-96', 'vm_count': 2, 'gpus_per_vm': 8}
+
+
+def test_vm_shards_cover_trials_exactly_once(job):
+    request = json.loads((job / 'request.json').read_text())
+    request['evaluation']['seeds'] = list(range(19))
+    all_trials = trial_requests(request)
+    first, second = trial_requests(request, 0, 2), trial_requests(request, 1, 2)
+    assert first == all_trials[::2]
+    assert second == all_trials[1::2]
+    assert len(first) + len(second) == len(all_trials)
+
+
+def test_empty_vm_shard_returns_valid_empty_artifacts(job, monkeypatch):
+    request = json.loads((job / 'request.json').read_text())
+    request['evaluation']['seeds'] = [7]
+    (job / 'request.json').write_text(json.dumps(request))
+    monkeypatch.setattr('torch.cuda.device_count', lambda: 8)
+    run_gpu_trials(job, 8, 1, 2)
+    assert json.loads((job / 'status.json').read_text())['completed'] == 0
+    assert all((job / name).exists() for name in runner.RESULT_FILES)
+
+
+@pytest.mark.parametrize('fail_second', [False, True])
+def test_two_vm_controller_merges_and_cleans_both(config, job, monkeypatch, fail_second):
+    request = json.loads((job / 'request.json').read_text())
+    request['execution']['gpu_count'] = 16
+    (job / 'request.json').write_text(json.dumps(request))
+    sources = []
+    for index, trial in enumerate(trial_requests(request)):
+        path = job / f'prepared-{index}'
+        path.mkdir()
+        (path / 'request.json').write_text(json.dumps(trial))
+        run_job(path)
+        (path / 'training.log').write_text('test log')
+        sources.append(path)
+    calls = []
+    def fake_cloud(*args, **kwargs):
+        calls.append(args)
+        if args[:3] == ('compute', 'instances', 'create'):
+            assert '--machine-type=g2-standard-96' in args
+            script = Path(next(arg.split('startup-script=')[1] for arg in args if 'startup-script=' in arg)).read_text()
+            assert '--gpu-count 8' in script
+            assert '--shard-count 2' in script
+            if fail_second and args[3].endswith('-1'):
+                raise RuntimeError('second VM capacity unavailable')
+        if args[:2] == ('storage', 'cp') and args[2].endswith('/result.zip'):
+            source = sources[1 if '/vm-1/' in args[2] else 0]
+            with zipfile.ZipFile(args[3], 'w') as archive:
+                for name in runner.RESULT_FILES:
+                    archive.write(source / name, 'job/' + name)
+                archive.writestr('job/exit-code', '0')
+        return subprocess.CompletedProcess(args, 0, '', '')
+    monkeypatch.setattr(runner, 'cloud', fake_cloud)
+    if fail_second:
+        with pytest.raises(RuntimeError, match='second VM'):
+            runner.run_gcp_job(job)
+    else:
+        runner.run_gcp_job(job)
+        rows = pd.read_csv(job / 'runs.csv')
+        assert sorted(rows.seed.tolist()) == [7, 19]
+        assert json.loads((job / 'status.json').read_text())['completed'] == 2
+    deleted = [args[3] for args in calls if args[:3] == ('compute', 'instances', 'delete')]
+    assert len(set(deleted)) == 2
+    assert json.loads((job / 'status.json').read_text())['gcp_cleanup'] == 'complete'

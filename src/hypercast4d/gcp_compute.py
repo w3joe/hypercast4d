@@ -9,8 +9,9 @@ from typing import Any
 
 GCP_MACHINES = {
     "L4": {1: "g2-standard-4", 2: "g2-standard-24", 4: "g2-standard-48", 8: "g2-standard-96"},
-    "A100-40GB": {**{n: f"a2-highgpu-{n}g" for n in (1, 2, 4, 8)}, 16: "a2-megagpu-16g"},
+    "A100-40GB": {n: f"a2-highgpu-{n}g" for n in (1, 2, 4, 8)},
 }
+GCP_COUNTS = {"L4": [1, 2, 4, 8, 16], "A100-40GB": [1, 2, 4, 8]}
 
 
 def normalize_gcp_execution(raw: dict[str, Any]) -> dict[str, Any]:
@@ -18,10 +19,13 @@ def normalize_gcp_execution(raw: dict[str, Any]) -> dict[str, Any]:
     count = raw.get("gpu_count", 1)
     if not isinstance(gpu, str) or gpu not in GCP_MACHINES:
         raise ValueError("GCP GPU must be L4 or A100-40GB")
-    if type(count) is not int or count not in GCP_MACHINES[gpu]:
+    if type(count) is not int or count not in GCP_COUNTS[gpu]:
         raise ValueError(f"unsupported GCP GPU count for {gpu}")
-    return {"target": "gcp", "gpu": gpu, "gpu_count": count,
-            "machine_type": GCP_MACHINES[gpu][count]}
+    result = {"target": "gcp", "gpu": gpu, "gpu_count": count,
+              "machine_type": GCP_MACHINES[gpu][min(count, 8)]}
+    if count == 16:
+        result.update(vm_count=2, gpus_per_vm=8)
+    return result
 
 
 def gcp_config() -> dict[str, str]:
@@ -55,5 +59,5 @@ def gcp_capability() -> dict[str, Any]:
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         message = str(error)
     return {"available": available, "message": message,
-            "gpus": [{"id": gpu, "label": gpu.replace("-", " "), "counts": list(machines)}
-                     for gpu, machines in GCP_MACHINES.items()]}
+            "gpus": [{"id": gpu, "label": gpu.replace("-", " "), "counts": counts}
+                     for gpu, counts in GCP_COUNTS.items()]}

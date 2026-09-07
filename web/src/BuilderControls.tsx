@@ -105,8 +105,8 @@ export function RunControls({
   const modal = compute.data?.modal
   const gcp = compute.data?.gcp
   const gcpGpus = gcp?.gpus ?? [
-    { id: 'L4', label: 'L4', counts: [1, 2, 4, 8] },
-    { id: 'A100-40GB', label: 'A100 40 GB', counts: [1, 2, 4, 8, 16] },
+    { id: 'L4', label: 'L4', counts: [1, 2, 4, 8, 16] },
+    { id: 'A100-40GB', label: 'A100 40 GB', counts: [1, 2, 4, 8] },
   ]
   const execution: ExecutionSpec = target === 'modal'
     ? { target: 'modal', gpu }
@@ -147,7 +147,7 @@ export function RunControls({
           </label>
           <label className="run-select"><span>GPUs</span>
             <select aria-label="GCP GPU count" value={gpuCount} onChange={(event) => setGpuCount(Number(event.target.value))}>
-              {gcpGpus.find(option => option.id === gcpGpu)?.counts.map(count => <option key={count} value={count}>{count} × GPU</option>)}
+              {gcpGpus.find(option => option.id === gcpGpu)?.counts.map(count => <option key={count} value={count}>{count === 16 ? '16 × GPU · 2 VMs' : `${count} × GPU`}</option>)}
             </select>
           </label>
         </>}
@@ -171,7 +171,7 @@ export function RunControls({
       </div>}
       {target === 'gcp' && <div className={`run-status ${gcp?.available ? 'ready' : ''}`} role="status">
         {compute.isLoading ? 'Checking GCP…' : gcp?.message ?? 'GCP availability could not be checked.'}
-        {gcp?.available && <span> · Billed VM; dataset and code uploaded to your bucket. {gpuCount > 1 ? 'Trials run in parallel; one model per GPU. Extra GPUs are idle if there are fewer cell/seed trials.' : 'One GPU per trial.'}</span>}
+        {gcp?.available && <span> · Billed VM{gpuCount === 16 ? 's: 2 × 8 L4 GPUs' : ''}; dataset and code uploaded to your bucket. {gpuCount > 1 ? 'Trials run in parallel; one model per GPU. Extra GPUs are idle if there are fewer cell/seed trials.' : 'One GPU per trial.'}</span>}
       </div>}
       <ErrorNotice error={(target !== 'local' && compute.error) || mutation.error} />
     </div>
