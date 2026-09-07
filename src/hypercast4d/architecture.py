@@ -13,6 +13,7 @@ from torch import nn
 
 from .algebras import COMPONENT_COUNT
 from .layers import HyperDense
+from .internal_editing import normalize_internal_overrides
 from .upstream_models import UPSTREAM_MODELS, UpstreamSequence, upstream_defaults
 from .models import CausalConv1d, parameter_count
 from .research_models import (
@@ -83,6 +84,9 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate and canonicalize the serializable portion of a model spec."""
     if not isinstance(raw, dict):
         raise ArchitectureError("architecture must be an object")
+    if raw.get('schema_version') == 2:
+        from .graph_architecture import normalize_graph
+        return normalize_graph(raw)
     if raw.get("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
         raise ArchitectureError(f"schema_version must be {SCHEMA_VERSION}")
     name = str(raw.get("name", "Untitled architecture")).strip()
@@ -134,6 +138,15 @@ def normalize_architecture_spec(raw: dict[str, Any]) -> dict[str, Any]:
                 "params": _normalize_layer_params(layer_type, params),
             }
         )
+        if 'internal_overrides' in item:
+            if not layer_type.startswith('tslib_'):
+                raise ArchitectureError('Internal edits are supported only on TSLib model blocks')
+            try:
+                edits = normalize_internal_overrides(item['internal_overrides'])
+            except ValueError as error:
+                raise ArchitectureError(str(error)) from error
+            if edits:
+                layers[-1]['internal_overrides'] = edits
 
     head_raw = raw.get("head", {})
     if not isinstance(head_raw, dict):
@@ -394,7 +407,8 @@ def _build_layer(
     if layer_type.startswith("tslib_"):
         if shape.kind != "sequence" or shape.steps is None:
             raise ArchitectureError(f"{layer_type} requires a sequence; place it before sequence reduction")
-        return UpstreamSequence(layer_type[6:], shape.steps, shape.width, **params), shape, shape.steps - 1
+        return UpstreamSequence(layer_type[6:], shape.steps, shape.width,
+                                internal_overrides=layer.get('internal_overrides'), **params), shape, shape.steps - 1
     if layer_type in RESEARCH_BLOCKS | RESEARCH_MODELS:
         if shape.kind != "sequence" or shape.steps is None:
             raise ArchitectureError(f"{layer_type} requires a sequence; place it before sequence reduction")
@@ -643,12 +657,18 @@ class ExperimentalForecaster(nn.Module):
 def build_architecture(
     spec: dict[str, Any], window: int, horizon: int, features: int = COMPONENT_COUNT
 ) -> ExperimentalForecaster:
+    if spec.get('schema_version') == 2:
+        from .graph_architecture import GraphForecaster
+        return GraphForecaster(spec, window, horizon, features)
     return ExperimentalForecaster(spec, window, horizon, features)
 
 
 def validate_architecture(
     spec: dict[str, Any], window: int, horizon: int, features: int = COMPONENT_COUNT
 ) -> dict[str, Any]:
+    if spec.get('schema_version') == 2:
+        from .graph_architecture import validate_graph
+        return validate_graph(spec, window, horizon, features)
     normalized = normalize_architecture_spec(spec)
     model = build_architecture(normalized, window, horizon, features)
     input_steps = window - 1 if normalized["input"]["representation"] == "differences" else window
@@ -660,10 +680,16 @@ def validate_architecture(
         "parameters": parameter_count(model),
         "receptive_field": model.receptive_field,
         "trace": [asdict(item) for item in model.trace],
+        "internals": {layer['id']: module.internal_targets
+                      for layer, module in zip(normalized['layers'], model.layers)
+                      if isinstance(module, UpstreamSequence)},
     }
 
 
 def architecture_hash(spec: dict[str, Any], evaluation: dict[str, Any] | None = None) -> str:
+    if spec.get('schema_version') == 2:
+        from .graph_architecture import graph_hash
+        return graph_hash(spec, evaluation)
     canonical = normalize_architecture_spec(spec)
     canonical.pop("name", None)
     payload: dict[str, Any] = {"architecture": canonical}

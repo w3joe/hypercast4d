@@ -1,5 +1,81 @@
 # Method implementation audit — 2026-09-06
 
+## Direct Dense / HyperDense replacement and Builder refinement
+
+The inspector now switches layer type without rewiring, converts real output
+width to four-component units, preserves bias, and checks every evaluation cell
+before applying the change. Incompatible conversions leave the original graph
+intact. Replacements use independent, newly initialized weights. Graph-only
+HyperDense now supports vector and higher-rank feature tensors; v1 behavior is
+unchanged. A searchable layer finder opens the containing group and focuses the
+selected layer. Type/algebra controls, readiness status and a separate run panel
+make the top-down Builder easier to navigate.
+
+Verification: **466 Python tests, 29 frontend tests, production build passed**.
+Tests include real internal-layer replacement with an optimizer update,
+vector/sequence/higher-rank HyperDense gradients and checkpoints for all three
+algebras, matched-width conversion, bias preservation, save/undo and rejection
+when another evaluation cell changes shape. No browser is connected, so visual
+review is still unverified.
+
+## Latest: graph-native architecture canvas
+
+The executable v2 graph replaces the earlier nested observer in the Builder.
+All 15 cores support layer and topology edits, multi-model branches, explicit
+sharing, independent duplication, saving/loading and all-cell validation.
+Verification against the combined workspace: **456 Python tests and 18 frontend
+tests passed**; the production build succeeded. All 15 pinned-source output and
+gradient comparisons also passed. See [graph architecture](graph_architecture.md).
+Live local API checks converted and validated every TSLib core. An edited
+TSMixer graph (temporal hidden width 64) completed a one-epoch job successfully.
+Browser visual review and GPU/Modal execution remain untested.
+
+## Historical follow-up: expandable model preview
+
+All 15 TSLib cores now support **Expand model** on their canvas cards. Graphs
+record leaf-module calls and observed tensor dependencies from a deterministic
+synthetic CPU eval pass, with explicit multi-source junctions. They do not infer
+execution order from module registration order. Single-source tensor operations
+are collapsed into edges; this is a sampled execution view, not an exhaustive
+static graph. Nodes linked to editable dense targets open the Inspector. A
+containing MLP can be selected as a group; its replacement nodes link back to
+that same group. Graphs refresh after architecture edits.
+
+Tests cover every core's graph, valid editable targets, acyclicity, output
+reachability, unchanged specs and CPU RNG state, both TSMixer residual branches,
+actual custom widths `64 → 16`, preceding-block width changes, and HTTP errors.
+Frontend tests exercise expansion, selecting a canvas node, applying an internal
+edit through the Inspector, collapsing/reopening, and selecting an MLP group.
+The graph has no authority to change connections or non-dense operations.
+
+Browser visual inspection could not be performed: there is no connected browser.
+Verification: **319 Python tests and 11 frontend tests passed**; production build
+succeeded.
+
+## Follow-up: internal dense editing
+
+Added shape-preserving replacements for actual Linear and pure dense Sequential
+submodules. TSMixer's temporal/channel MLPs can now have their internal hidden
+widths changed rather than just accepting layers around the model core.
+The editor is deliberately not a general graph-rewiring interface.
+
+Verification: **300 Python tests and 8 frontend tests passed**, production build
+succeeded. Every exposed internal target was individually replaced and checked
+for finite gradients through its new parameters and inputs. Tests also cover
+optimizer updates, checkpoint serialization/reconstruction, unchanged-model
+weights/output/RNG/hash parity, invalid and overlapping edits, API inspection,
+saved-spec roundtrips and a real one-epoch edited-TSMixer playground job.
+The pinned-source audit still passes for all 15 unmodified model cores.
+
+Inactive calendar embeddings, TimeMixer's unused joint-mode `out_cross_layer`
+and MSGNet's unused `predict_linear` are excluded rather than offering no-op
+controls. SCINet exposes no dense targets because its projections are convolutions.
+The UI can reset edits even when a changed core configuration invalidates a path.
+Browser visual review remains unavailable (no connected browser).
+
+The coverage verdict below is unchanged: internal editing does not implement
+any of the remaining reference-only methods.
+
 ## Verdict: partial implementation, not completion of all requested methods
 
 15 of the 50 unique methods on the requested pages now have runnable TSLib-core
@@ -69,6 +145,18 @@ was not copied into this repository. A licensed source or independent implementa
 is still needed. Several remaining ordinary forecasters also simply remain undone.
 
 ## Untested scope
+
+### Graph-native refactor (2026-09-06)
+
+All 15 runnable TSLib cores now lower to editable executable graphs on the same
+architecture canvas. The v1 source remains a parity reference and initialization
+recipe, not a whole-model execution fallback. The graph audit compares outputs,
+gradients, optimizer updates and checkpoints, plus all-model one-epoch jobs.
+Runtime period selection and Crossformer segment merging remain dynamic; MSGNet
+in-place masking was functionalized into explicit graph dependencies. See
+[graph architecture](graph_architecture.md) for the contract, workflow and tests.
+
+### Boundaries
 
 Published benchmark scores, GPU/MPS execution, live Modal deployment, broad
 hyperparameter sweeps and browser visual review. Modal image dependencies were

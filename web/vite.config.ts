@@ -14,7 +14,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom', '@tanstack/react-query'],
-          editor: ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+          flow: ['@xyflow/react'],
+          layout: ['elkjs/lib/elk.bundled.js'],
           charts: ['recharts'],
         },
       },

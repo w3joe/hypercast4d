@@ -188,7 +188,7 @@ def test_playground_reads_main_reproduction_results(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("preset_id", ["residual-tcn", "research-dlinear", "research-patchtst", "research-itransformer"] + [
     f"tslib-{name}" for name in UPSTREAM_MODELS
-])
+] + ['tslib-tsmixer-internal'] + [f'tslib-{name}-graph' for name in UPSTREAM_MODELS])
 def test_worker_completes_a_real_validation_job(
     tmp_path: Path, monkeypatch, preset_id: str
 ) -> None:
@@ -202,9 +202,16 @@ def test_worker_completes_a_real_validation_job(
     frame.to_excel(data_directory / "paper_data.xlsx", index=False)
     job_dir = tmp_path / "job"
     job_dir.mkdir()
+    architecture = _preset(preset_id.removesuffix('-internal').removesuffix('-graph'))
+    if preset_id.endswith('-graph'):
+        from hypercast4d.graph_architecture import convert_to_graph
+        architecture = convert_to_graph(architecture)
+    if preset_id.endswith('-internal'):
+        architecture['layers'][0]['internal_overrides'] = {
+            'model.0.temporal': {'hidden_units': [16], 'activation': 'gelu', 'dropout': .1, 'bias': True}}
     request = {
         "phase": "validation",
-        "architecture": _preset(preset_id),
+        "architecture": architecture,
         "evaluation": {
             "preset": "quick",
             "data_path": "data/raw/paper_data.xlsx",
@@ -221,3 +228,38 @@ def test_worker_completes_a_real_validation_job(
     runs = pd.read_csv(job_dir / "runs.csv")
     assert list(runs["split"]) == ["validation"]
     assert np.isfinite(runs.loc[0, "mae_ratio"])
+
+
+def test_graph_api_migration_drafts_and_all_cell_validation(tmp_path):
+    from hypercast4d.graph_architecture import convert_to_graph
+    manager = JobManager(tmp_path / 'results', tmp_path)
+    original = manager.save_architecture(_preset('tslib-tsmixer'))
+    graph = convert_to_graph(original['spec'])
+    view = {'positions': {'input': {'x': 10, 'y': 20}}, 'collapsed': ['layer-core']}
+    saved = manager.save_architecture({**graph, 'view': view})
+    assert saved['id'] != original['id']
+    assert manager.get_architecture(original['id'])['spec']['schema_version'] == 1
+    assert manager.get_architecture(saved['id'])['view'] == view
+    # Drafts may be saved, but are not accepted for execution.
+    graph['edges'].pop()
+    manager.save_architecture(graph)
+    with pytest.raises(ValueError, match='ports'):
+        manager.submit_validation(graph, {'preset': 'quick'})
+    graph = convert_to_graph(original['spec'])
+    graph['nodes'].append({'id': 'fixed-head', 'kind': 'dense', 'params': {'units': 1}})
+    graph['edges'].append({'source': graph['output'], 'target': 'fixed-head', 'port': 'x'})
+    graph['output'] = 'fixed-head'
+    with pytest.raises(ValueError, match='Forecast output'):
+        manager.submit_validation(graph, {'preset': 'quick', 'cells': [{'window': 10, 'horizon': 1}, {'window': 10, 'horizon': 3}]})
+
+
+def test_convert_endpoint_returns_executable_nodes(tmp_path):
+    app = create_app(tmp_path / 'results', tmp_path)
+    with TestClient(app) as client:
+        response = client.post('/api/v1/architectures/convert', json={'architecture': _preset('tslib-frets')})
+        assert response.status_code == 200
+        graph = response.json()
+        assert graph['schema_version'] == 2 and len(graph['nodes']) > 20
+        response = client.post('/api/v1/architectures/validate', json={'architecture': graph, 'window': 10, 'horizon': 3})
+        assert response.status_code == 200
+        assert any(n['label'] == 'Linear' for n in response.json()['graph_nodes'].values())

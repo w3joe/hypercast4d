@@ -1,6 +1,7 @@
 """Pinned TSLib implementations exposed as composable sequence-to-sequence blocks.
 
-These blocks preserve the upstream model internals. Their output is a learned
+Without explicit internal overrides these blocks preserve upstream internals.
+Overrides replace selected dense subtrees and create custom variants. Their output is a learned
 sequence representation for the surrounding playground architecture, not a claim
 that an arbitrary hybrid reproduces the published end-to-end model.
 """
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 from torch.nn import functional as F
+from .internal_editing import apply_internal_overrides
 
 
 UPSTREAM_MODELS = {
@@ -62,7 +64,8 @@ class UpstreamSequence(nn.Module):
     """
 
     def __init__(self, method: str, steps: int, width: int, d_model: int = 32,
-                 num_layers: int = 1, n_heads: int = 4, dropout: float = 0.1) -> None:
+                 num_layers: int = 1, n_heads: int = 4, dropout: float = 0.1,
+                 internal_overrides: dict | None = None) -> None:
         super().__init__()
         self.method, self.steps, self.width = method, steps, width
         self.padded_steps = max(32, ((steps + 31) // 32) * 32)
@@ -71,6 +74,15 @@ class UpstreamSequence(nn.Module):
             self.config.channel_independence = "0"
         module = import_module(f"hypercast4d._vendor.tslib.models.{UPSTREAM_MODELS[method]}")
         self.model = module.Model(self.config)
+        # The adapter supplies no calendar marks. TimeMixer uses the joint-channel
+        # branch; its out_cross_layer exists but is unused in that configuration.
+        excluded = [path for path, _ in self.model.named_modules()
+                    if path.endswith('temporal_embedding')]
+        if method == 'timemixer' and not self.config.channel_independence:
+            excluded.extend(f'pdm_blocks.{i}.out_cross_layer' for i in range(num_layers))
+        if method == 'msgnet':
+            excluded.append('predict_linear')  # Defined upstream, unused by forecast().
+        self.internal_targets = apply_internal_overrides(self.model, internal_overrides or {}, excluded)
 
     def prepare_input(self, inputs: torch.Tensor) -> torch.Tensor:
         return F.pad(inputs.transpose(1, 2), (self.padded_steps - self.steps, 0),

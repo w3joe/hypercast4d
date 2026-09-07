@@ -1,9 +1,63 @@
 export type LayerParams = Record<string, string | number | number[]>
 
+export type GraphNodeSpec = {
+  id: string
+  kind: string
+  params: Record<string, unknown>
+  source_ref?: { source: string; node: string }
+  module_ref?: string
+  group?: string
+  label?: string
+}
+export type GraphEdgeSpec = { source: string; target: string; port: string }
+export type GraphSpec = {
+  schema_version: 2
+  revision: string
+  name: string
+  sources: Record<string, ArchitectureSpec>
+  nodes: GraphNodeSpec[]
+  edges: GraphEdgeSpec[]
+  groups: { id: string; label: string }[]
+  output: string
+  locked?: boolean
+  preset_id?: string
+}
+export type GraphViewState = { positions: Record<string, { x: number; y: number }>; collapsed: string[] }
+export type GraphNodeInfo = { label: string; ports: string[]; shape: unknown; settings: Record<string, unknown>; category: string; source_path?: string }
+export type GraphValidation = { valid: boolean; spec: GraphSpec; parameters: number; graph_nodes: Record<string, GraphNodeInfo>; warnings: string[] }
+export type GraphRecord = { id: string; spec: GraphSpec | ArchitectureSpec; view?: GraphViewState }
+
+export type InternalOverride = {
+  hidden_units: number[]
+  activation: 'relu' | 'gelu' | 'silu' | 'tanh' | 'linear'
+  dropout: number
+  bias: boolean
+}
+
+export type InternalTarget = {
+  path: string
+  kind: 'dense' | 'dense_stack'
+  in_features: number
+  out_features: number
+  hidden_units: number[]
+  structure: string[]
+  override: InternalOverride | null
+  blocked_by: string | null
+}
+
+export type InternalGraph = {
+  mode: 'observed'
+  notice: string
+  targets: InternalTarget[]
+  nodes: { id: string; label: string; kind: string; path: string | null; target: string | null; shapes: number[][] }[]
+  edges: { source: string; target: string }[]
+}
+
 export type LayerSpec = {
   id: string
   type: string
   params: LayerParams
+  internal_overrides?: Record<string, InternalOverride>
 }
 
 export type ArchitectureSpec = {
@@ -123,6 +177,7 @@ export type ValidationResult = {
   parameters: number
   receptive_field: number
   trace: TraceEntry[]
+  internals?: Record<string, InternalTarget[]>
 }
 
 export type ResultSummary = {

@@ -31,6 +31,7 @@ from .architecture import (
 )
 from .compute import modal_capability, normalize_execution
 from .method_collection import method_collection
+from .internal_graph import architecture_internal_graph
 from .playground_runner import (
     EVALUATION_DEFAULTS,
     EVALUATION_PRESETS,
@@ -201,6 +202,10 @@ class JobManager:
             "hash": architecture_hash(spec),
             "spec": spec,
         }
+        if spec['schema_version'] == 2 and isinstance(raw.get('view'), dict):
+            if len(json.dumps(raw['view'], allow_nan=False)) > 1_000_000:
+                raise ValueError('Canvas view state is too large')
+            record['view'] = raw['view']
         _atomic_json(path, record)
         return record
 
@@ -266,6 +271,9 @@ class JobManager:
         if normalized_execution["target"] == "modal":
             evaluation_payload["device"] = "cuda"
         normalized_evaluation = normalize_evaluation(evaluation_payload)
+        if spec['schema_version'] == 2:
+            for cell in normalized_evaluation['cells']:
+                validate_architecture(spec, cell['window'], cell['horizon'])
         candidate_hash = architecture_hash(
             spec,
             {**normalized_evaluation, "execution": normalized_execution},
@@ -400,6 +408,30 @@ def create_app(
             horizon = int(payload.get("horizon", 1))
             return validate_architecture(payload["architecture"], window, horizon)
         except (KeyError, TypeError, ValueError, ArchitectureError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/v1/architectures/internal-graph")
+    def internal_graph(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return architecture_internal_graph(payload['architecture'], payload['layer_id'],
+                                               int(payload.get('window', 10)), int(payload.get('horizon', 1)))
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post('/api/v1/architectures/convert')
+    def convert(payload: dict[str, Any]) -> dict[str, Any]:
+        from .graph_architecture import convert_to_graph
+        try:
+            return convert_to_graph(payload['architecture'], int(payload.get('window', 10)), int(payload.get('horizon', 1)))
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post('/api/v1/architectures/describe')
+    def describe_architecture(payload: dict[str, Any]) -> dict[str, Any]:
+        from .graph_architecture import describe_graph
+        try:
+            return describe_graph(payload['architecture'], int(payload.get('window', 10)), int(payload.get('horizon', 1)))
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/v1/architectures")
