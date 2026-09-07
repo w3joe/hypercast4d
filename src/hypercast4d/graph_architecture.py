@@ -13,6 +13,7 @@ import torch
 from torch import nn
 from torch.fx import Node
 
+from .algebras import get_algebra
 from .graph_lowering import lower_source
 from .layers import HyperDense
 
@@ -203,10 +204,15 @@ def adapt_module(original, params, inputs):
     requested = {**settings, **params}
     x = inputs[0] if inputs else None
     if isinstance(original, HyperDense):
-        if x.shape[-1] % 4:
-            raise ValueError('HyperDense input width must be divisible by four')
-        if x.shape[-1] != original.in_features * 4 or requested != settings:
-            return HyperDense(x.shape[-1] // 4, _bounded(requested['out_features'], 'out_features'), requested['algebra'], bool(requested['bias']))
+        algebra = get_algebra(requested['algebra'])
+        dimension = algebra.component_count
+        if x.shape[-1] % dimension:
+            raise ValueError(
+                f'HyperDense input width must be divisible by {dimension} '
+                f'for {algebra.name}'
+            )
+        if x.shape[-1] != original.in_features * dimension or requested != settings:
+            return HyperDense(x.shape[-1] // dimension, _bounded(requested['out_features'], 'out_features'), algebra, bool(requested['bias']))
     elif isinstance(original, nn.Linear):
         width = _bounded(requested['out_features'], 'out_features')
         if x.shape[-1] != original.in_features or requested != settings:
@@ -445,9 +451,14 @@ class GraphForecaster(nn.Module):
                     if type(p.get('bias', True)) is not bool:
                         raise ValueError('bias must be true or false')
                     if kind == 'hyper_dense':
-                        if x.shape[-1] % 4:
-                            raise ValueError('HyperDense input width must be divisible by four')
-                        module = HyperDense(x.shape[-1] // 4, normalized['units'], normalized['algebra'], bias=p.get('bias', True))
+                        algebra = get_algebra(normalized['algebra'])
+                        dimension = algebra.component_count
+                        if x.shape[-1] % dimension:
+                            raise ValueError(
+                                f'HyperDense input width must be divisible by '
+                                f'{dimension} for {algebra.name}'
+                            )
+                        module = HyperDense(x.shape[-1] // dimension, normalized['units'], algebra, bias=p.get('bias', True))
                     else:
                         module = nn.Linear(x.shape[-1], normalized['units'], bias=p.get('bias', True))
                 else:

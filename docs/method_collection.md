@@ -143,7 +143,8 @@ Last state) before the forecast head. Dense layers can also follow a reduction.
 
 For example: **Patch embedding → Temporal attention → HyperDense → GRU → Last
 state → Forecast head** combines patch attention with hypercomplex feature mixing
-and recurrent processing. Keep the width entering HyperDense divisible by four.
+and recurrent processing. Keep the width entering HyperDense divisible by the
+selected algebra dimension (2, 3, 4, or 8).
 
 Feature subsets and order, levels/centered/difference inputs, and all forecast
 heads remain editable. Validation rejects shape incompatibilities and invalid

@@ -89,6 +89,7 @@ export type Catalog = {
   input_representations: string[]
   head_types: string[]
   algebras: string[]
+  algebra_dimensions: Record<string, number>
   activations: string[]
   presets: ArchitectureSpec[]
   evaluation_presets: Record<string, EvaluationPreset>

@@ -1,13 +1,15 @@
 """HyperCast4D: leakage-safe checks for 4D hypercomplex forecasting."""
 
-from .algebras import COMPONENT_COUNT, Algebra, get_algebra
+from .algebras import ALGEBRAS, COMPONENT_COUNT, PAPER_COMPONENT_COUNT, Algebra, get_algebra
 from .architecture import ArchitectureError, build_architecture, validate_architecture
 from .layers import HyperDense
 
 __all__ = [
     "Algebra",
+    "ALGEBRAS",
     "ArchitectureError",
     "COMPONENT_COUNT",
+    "PAPER_COMPONENT_COUNT",
     "HyperDense",
     "build_architecture",
     "get_algebra",

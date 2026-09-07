@@ -11,7 +11,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from .algebras import COMPONENT_COUNT
+from .algebras import ALGEBRAS as ALGEBRA_REGISTRY, COMPONENT_COUNT, get_algebra
 from .layers import HyperDense
 from .internal_editing import normalize_internal_overrides
 from .upstream_models import UPSTREAM_MODELS, UpstreamSequence, upstream_defaults
@@ -23,7 +23,7 @@ from .research_models import (
 
 
 SCHEMA_VERSION = 1
-ALGEBRAS = ("quaternion", "coquaternion", "cl11")
+ALGEBRAS = tuple(ALGEBRA_REGISTRY)
 ACTIVATIONS = ("relu", "gelu", "silu", "tanh", "linear")
 INPUT_REPRESENTATIONS = ("levels", "centered", "differences")
 HEAD_TYPES = ("direct", "persistence_residual", "cumulative_residual")
@@ -216,8 +216,11 @@ def _normalize_layer_params(layer_type: str, params: dict[str, Any]) -> dict[str
         algebra = str(params.get("algebra", "quaternion"))
         if algebra not in ALGEBRAS:
             raise ArchitectureError(f"algebra must be one of {ALGEBRAS}")
+        dimension = get_algebra(algebra).component_count
         return {
-            "units": _bounded_int(params.get("units", 8), "units", 1, 128),
+            "units": _bounded_int(
+                params.get("units", 8), "units", 1, 512 // dimension
+            ),
             "algebra": algebra,
         }
     if layer_type == "causal_conv":
@@ -437,16 +440,21 @@ def _build_layer(
     if layer_type == "hyper_dense":
         if shape.kind != "sequence":
             raise ArchitectureError("HyperDense requires a sequence")
-        if shape.width % COMPONENT_COUNT:
-            raise ArchitectureError("HyperDense input width must be divisible by four")
+        algebra = get_algebra(params["algebra"])
+        dimension = algebra.component_count
+        if shape.width % dimension:
+            raise ArchitectureError(
+                f"HyperDense input width must be divisible by {dimension} "
+                f"for {algebra.name}"
+            )
         module = HyperDense(
-            shape.width // COMPONENT_COUNT,
+            shape.width // dimension,
             params["units"],
-            algebra=params["algebra"],
+            algebra=algebra,
         )
         return (
             module,
-            TensorShape("sequence", COMPONENT_COUNT * params["units"], shape.steps),
+            TensorShape("sequence", dimension * params["units"], shape.steps),
             0,
         )
     if layer_type == "causal_conv":
@@ -805,6 +813,10 @@ def layer_catalog() -> dict[str, Any]:
         "input_representations": list(INPUT_REPRESENTATIONS),
         "head_types": list(HEAD_TYPES),
         "algebras": list(ALGEBRAS),
+        "algebra_dimensions": {
+            name: algebra.component_count
+            for name, algebra in ALGEBRA_REGISTRY.items()
+        },
         "activations": list(ACTIVATIONS),
     }
 

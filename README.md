@@ -15,6 +15,11 @@ PyTorch and compares them with persistence, linear, CNN, and LSTM forecasters.
 The evaluation uses chronological splits and training-only normalization to
 avoid future-data leakage.
 
+The architecture playground also supports exploratory HyperDense layers built
+from 2D complex and split-complex numbers, 3D cyclic tricomplex numbers, and 8D
+octonions. These extensions are available for new ablations; the paper presets
+and reproduction path remain the original four-dimensional experiment.
+
 This project is only about the 4D hypercomplex paper. It has no connection to
 Numerion.
 

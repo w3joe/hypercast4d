@@ -25,7 +25,8 @@ beforeEach(() => {
       categories: [{ name: 'Feature mixing', layers: [{ type: 'dense', label: 'Dense', defaults: { units: 32 } }] }],
       input_representations: ['levels', 'centered', 'differences'],
       head_types: ['direct', 'persistence_residual', 'cumulative_residual'],
-      algebras: ['quaternion', 'coquaternion', 'cl11'],
+      algebras: ['complex', 'split_complex', 'tricomplex', 'quaternion', 'coquaternion', 'cl11', 'octonion'],
+      algebra_dimensions: { complex: 2, split_complex: 2, tricomplex: 3, quaternion: 4, coquaternion: 4, cl11: 4, octonion: 8 },
       activations: ['relu', 'gelu', 'silu', 'tanh', 'linear'],
       presets: [paperPreset],
       method_collection: {
@@ -127,7 +128,9 @@ describe('graph-native playground', () => {
     fireEvent.change(selector, { target: { value: 'hyper_dense' } })
     await waitFor(() => expect(selector).toHaveValue('hyper_dense'))
     const algebra = screen.getByRole('combobox', { name: 'Algebra' })
+    await waitFor(() => expect(algebra).toBeEnabled())
     fireEvent.change(algebra, { target: { value: 'cl11' } })
+    await waitFor(() => expect(algebra).toHaveValue('cl11'))
     fireEvent.click(screen.getByRole('button', { name: 'Save graph' }))
     await waitFor(() => expect(saved).toHaveLength(1))
     expect(saved[0].nodes.find((n: any) => n.id === 'linear').params).toEqual({ units: 8, bias: false, algebra: 'cl11' })
@@ -172,8 +175,10 @@ describe('graph-native playground', () => {
     await screen.findByRole('button', { name: 'Clone to edit' })
     expect(screen.getByRole('combobox', { name: 'Load graph preset' })).toHaveValue('paper-quaternion')
     expect(screen.getByRole('group', { name: 'Paper baselines' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Load saved graph' })).not.toBeVisible()
+    fireEvent.click(screen.getByText('Open saved'))
     expect(screen.getByRole('combobox', { name: 'Load saved graph' })).toBeDisabled()
-    expect(screen.getByRole('option', { name: 'No saved experiments yet' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Open saved'))
     expect(screen.getByText('2. Edit architecture')).toBeVisible()
     expect(screen.getByText('3. Run experiment')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Share selected weights' })).not.toBeInTheDocument()
@@ -181,6 +186,12 @@ describe('graph-native playground', () => {
     expect(screen.queryByRole('combobox', { name: 'Operation' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add layers' }))
     expect(screen.getByRole('combobox', { name: 'Operation' })).toBeVisible()
+    expect(screen.queryByRole('textbox', { name: 'Search layers' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Layer settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Replace selected' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Layers$/ }))
+    expect(screen.getByRole('textbox', { name: 'Search layers' })).toBeVisible()
+    expect(screen.queryByRole('combobox', { name: 'Operation' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Advanced tools' }))
     expect(screen.getByRole('button', { name: 'Export YAML' })).toBeVisible()
   })

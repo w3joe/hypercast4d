@@ -5,6 +5,7 @@ import json
 import pytest
 import torch
 
+from hypercast4d.algebras import ALGEBRAS
 from hypercast4d.architecture import architecture_hash, build_architecture, presets, validate_architecture
 from hypercast4d.graph_architecture import convert_to_graph
 from hypercast4d.upstream_models import UPSTREAM_MODELS
@@ -272,25 +273,26 @@ def test_explicit_shape_and_attention_operations(kind, params):
     assert x.grad is not None
 
 
-@pytest.mark.parametrize('algebra', ['quaternion', 'coquaternion', 'cl11'])
+@pytest.mark.parametrize('algebra', ALGEBRAS)
 @pytest.mark.parametrize('rank', [2, 3, 4])
 def test_hyperdense_replacement_supports_feature_tensors_and_checkpoint(algebra, rank):
+    dimension = ALGEBRAS[algebra].component_count
     graph = convert_to_graph(spec('tsmixer'))
     previous = graph['output']
     graph['nodes'] += [
-        {'id': 'shape-in', 'kind': 'reshape', 'params': {'shape': [0] + [1] * (rank - 2) + [4]}},
+        {'id': 'shape-in', 'kind': 'reshape', 'params': {'shape': [0] + [1] * (rank - 2) + [dimension]}},
         {'id': 'hyper', 'kind': 'hyper_dense', 'params': {'units': 1, 'algebra': algebra, 'bias': False}},
-        {'id': 'shape-out', 'kind': 'reshape', 'params': {'shape': [0, 4]}},
+        {'id': 'shape-out', 'kind': 'reshape', 'params': {'shape': [0, dimension]}},
     ]
     graph['edges'] += [{'source': previous, 'target': 'shape-in', 'port': 'x'}, {'source': 'shape-in', 'target': 'hyper', 'port': 'x'}, {'source': 'hyper', 'target': 'shape-out', 'port': 'x'}]
     graph['output'] = 'shape-out'
-    model = build_architecture(graph, 10, 4)
+    model = build_architecture(graph, 10, dimension)
     layer = model.blocks[model.bindings['hyper']]
     assert layer.bias is None
     x = torch.randn(3, 10, 4, requires_grad=True)
     model(x).square().mean().backward()
     assert layer.weight.grad is not None and x.grad is not None
-    restored = build_architecture(graph, 10, 4)
+    restored = build_architecture(graph, 10, dimension)
     restored.load_state_dict(model.state_dict())
     torch.testing.assert_close(restored.eval()(x), model.eval()(x))
 

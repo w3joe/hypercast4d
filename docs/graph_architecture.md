@@ -15,20 +15,43 @@ model insertion, import/export, weight sharing and grouping controls. **Arrange
 top-down** reflows an older saved layout without changing the model or expanding
 its groups. Layer and connection editing still use the same executable canvas.
 
+The Builder uses one contextual sidebar: **Layers** for searching, **Settings**
+for the selected node, and **Add layers** for insertion. Only one of these views
+is shown at a time. Clicking a node opens Settings automatically. Saved
+experiments live under **Open saved**; rename/shape details and layout commands
+are under **Advanced tools**. Undo and redo appear when history is available.
+Canvas zoom/fit controls remain in the canvas rather than being duplicated in
+the toolbar. These presentation changes do not alter saved execution graphs.
+
 ### Swap Dense and HyperDense
 
 Select a layer (or use **Find a layer**) and choose its **Layer type** in the
-settings panel. Dense → HyperDense maps 32 output features to 8 hypercomplex
-units, preserving the 32-wide output. Choose Quaternion, Coquaternion or Cl(1,1)
-from **Algebra**. Switching back restores the equivalent real output width.
+settings panel. Choose the target algebra first; Dense → HyperDense preserves
+the real output width while converting it to the corresponding number of
+hypercomplex units. For example, 24 real output features become 12 complex,
+8 tricomplex, 6 quaternion, or 3 octonion units. Switching back restores the
+equivalent real output width.
 
 The switch checks every selected evaluation cell before committing, preserves
 connections, group placement and bias, and rejects incompatible widths without
-changing the graph. Input and output widths must both be divisible by four for
-the HyperDense conversion. No padding/projection is silently inserted. Graph
-HyperDense supports vector, sequence and higher-rank feature tensors; the v1
-sequence-only contract is unchanged. Replacement weights are newly initialized;
-a shared call becomes independent when switched. Undo restores the original node.
+changing the graph. Input and output widths must both be divisible by the
+selected algebra's component count. Changing an existing HyperDense algebra also
+preserves its expanded real width or is rejected. No padding/projection is
+silently inserted. Graph HyperDense supports vector, sequence and higher-rank
+feature tensors; the v1 sequence-only contract is unchanged. Replacement weights
+are newly initialized; a shared call becomes independent when switched. Undo
+restores the original node.
+
+| Dimension | Algebra choices | Basis/product convention |
+| --- | --- | --- |
+| 2D | Complex, split-complex | `i² = -1` or `i² = +1` |
+| 3D | Cyclic tricomplex | `h² = k`, `k² = h`, `hk = 1` |
+| 4D | Quaternion, coquaternion, `Cl(1,1)` | Paper multiplication tables |
+| 8D | Octonion | Explicit Fano-plane orientation |
+
+The cyclic tricomplex algebra is associative and commutative but has zero
+divisors. Octonion multiplication is non-associative. HyperDense uses one binary
+input-by-weight product, so both remain well-defined for this layer.
 
 1. Load a preset, then **Clone to edit**. Expand a group or use **Expand all**.
 2. Select a layer to change its settings. Compatible Linear/Conv input widths

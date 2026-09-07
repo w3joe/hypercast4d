@@ -39,6 +39,26 @@ def test_hyper_model_uses_requested_algebra() -> None:
     assert model.first.algebra.name == "cl11"
 
 
+@pytest.mark.parametrize(
+    ("name", "features"),
+    [("hyper_complex", 2), ("hyper_tricomplex", 3), ("hyper_octonion", 8)],
+)
+def test_hyper_model_supports_other_algebra_dimensions(
+    name: str, features: int
+) -> None:
+    model = build_model(
+        name, window=10, horizon=2, features=features, **PAPER_MODEL_OPTIONS
+    )
+    assert model(torch.randn(3, 10, features)).shape == (3, 2)
+
+
+def test_hyper_model_rejects_feature_width_incompatible_with_algebra() -> None:
+    with pytest.raises(ValueError, match="divisible by 3"):
+        build_model(
+            "hyper_tricomplex", window=10, horizon=1, **PAPER_MODEL_OPTIONS
+        )
+
+
 def test_paper_scaffold_contains_both_optional_dense_layers() -> None:
     model = build_model("cnn", window=10, horizon=1, **PAPER_MODEL_OPTIONS)
     assert isinstance(model, PaperForecaster)

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as functional
 from torch import nn
 
-from .algebras import COMPONENT_COUNT
+from .algebras import COMPONENT_COUNT, get_algebra
 from .layers import HyperDense
 
 
@@ -91,8 +91,16 @@ class PaperForecaster(nn.Module):
         elif kind == "hyper":
             if algebra is None:
                 raise ValueError("A hypercomplex model requires an algebra")
-            self.first = HyperDense(1, first_layer_units, algebra=algebra)
-            first_width = COMPONENT_COUNT * first_layer_units
+            algebra_spec = get_algebra(algebra)
+            dimension = algebra_spec.component_count
+            if features % dimension:
+                raise ValueError(
+                    f"features must be divisible by {dimension} for {algebra}"
+                )
+            self.first = HyperDense(
+                features // dimension, first_layer_units, algebra=algebra_spec
+            )
+            first_width = dimension * first_layer_units
         else:
             raise ValueError("kind must be 'cnn', 'lstm', or 'hyper'")
 
@@ -167,10 +175,11 @@ def build_model(
     activation: str | None = None,
     dropout: float | None = None,
     pool_size: int | None = None,
+    features: int = COMPONENT_COUNT,
 ) -> nn.Module:
     """Build a configured baseline or Figure 3 forecasting architecture."""
     if name == "linear":
-        return LinearForecaster(window, horizon)
+        return LinearForecaster(window, horizon, features)
     required = {
         "first_layer_units": first_layer_units,
         "dense_before_pool": dense_before_pool,
@@ -205,6 +214,7 @@ def build_model(
         pool_size=int(pool_size),
         conv_kernel_size=conv_kernel_size,
         algebra=algebra,
+        features=features,
     )
 
 

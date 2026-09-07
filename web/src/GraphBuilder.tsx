@@ -10,7 +10,7 @@ import MethodCollection from './MethodCollection'
 import type { ArchitectureSpec, Catalog, GraphSpec, GraphNodeSpec, GraphNodeInfo, GraphRecord, GraphViewState } from './types'
 import { appendGraph, connectGraph, duplicateGraph, edgeId, emptyView, parseHandle, projectGraph, safeView, uid } from './graphCanvas'
 import type { CanvasData } from './graphCanvas'
-import { denseKind, prepareDenseSwap } from './layerSwap'
+import { DEFAULT_ALGEBRA_DIMENSIONS, denseKind, prepareDenseSwap } from './layerSwap'
 
 function Handles({ data }: { data: CanvasData }) {
   return <>{data.ports.map((p, i) => <Handle key={p.id} id={p.id} type="target" position={Position.Top} style={{ left: `${100 * (i + 1) / (data.ports.length + 1)}%` }} title={`Input · ${p.label}`} />)}
@@ -54,8 +54,11 @@ function Builder({ catalog }: { catalog: Catalog }) {
   const [validating, setValidating] = useState(false), [loading, setLoading] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([]), [message, setMessage] = useState('')
   const [savedId, setSavedId] = useState<string>(), [library, setLibrary] = useState(false)
-  const [advanced, setAdvanced] = useState(false), [showLayers, setShowLayers] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
+  const [panel, setPanel] = useState<'layers' | 'settings' | 'add'>('layers')
+  useEffect(() => { if (selected[0] || selectedEdge) setPanel('settings') }, [selected[0], selectedEdge])
   const [swapping, setSwapping] = useState(false), [swapError, setSwapError] = useState('')
+  const [replacementAlgebra, setReplacementAlgebra] = useState('quaternion')
   const [layerSearch, setLayerSearch] = useState('')
   const pendingFocus = useRef<string | null>(null)
   useEffect(() => { setSwapError('') }, [selected[0]])
@@ -83,7 +86,7 @@ function Builder({ catalog }: { catalog: Catalog }) {
       const next = { ...converted, locked: Boolean(spec.locked), preset_id: spec.preset_id }
       setSnapshot({ graph: next, view: record?.view ? safeView(record.view, converted) : { positions: {}, collapsed: converted.groups.map(g => g.id) } })
       setSavedId(spec.schema_version === 2 ? record?.id : undefined)
-      setMetadata(description.graph_nodes ?? {}); setValidatedGraph(null); setSelected([]); setSelectedEdge(null)
+      setMetadata(description.graph_nodes ?? {}); setValidatedGraph(null); setSelected([]); setSelectedEdge(null); setPanel('layers')
       past.current = []; future.current = []; setLibrary(false)
       setMessage('')
     } catch (e) { setError(String(e)) }
@@ -196,12 +199,14 @@ function Builder({ catalog }: { catalog: Catalog }) {
   const info = inspect ? metadata[inspect.id] : undefined
   const settings = inspect ? { ...info?.settings, ...inspect.params } : {}
   const layerKind = inspect ? denseKind(inspect, info) : null
-  const switchLayer = async (target: 'dense' | 'hyper_dense') => {
+  const algebraDimensions = catalog.algebra_dimensions ?? DEFAULT_ALGEBRA_DIMENSIONS
+  const switchLayer = async (target: 'dense' | 'hyper_dense', algebra?: string) => {
     if (!graph || !inspect || graph.locked || validatedGraph !== graph || swapping) return
     setSwapError(''); setSwapping(true)
     const selectedEvaluation = evaluation
     try {
-      const next = prepareDenseSwap(graph, inspect.id, target, metadata)
+      const selectedAlgebra = algebra ?? replacementAlgebra
+      const next = prepareDenseSwap(graph, inspect.id, target, metadata, selectedAlgebra, algebraDimensions)
       let preview: Record<string, GraphNodeInfo> | undefined
       for (const cell of selectedEvaluation.cells) {
         const before = await api.validateGraph(graph, cell.window, cell.horizon)
@@ -212,6 +217,7 @@ function Builder({ catalog }: { catalog: Catalog }) {
       if (current.current?.graph !== graph || evaluationRef.current !== selectedEvaluation) throw new Error('The experiment changed while checking. Please try the switch again.')
       commit({ ...current.current, graph: next })
       setMetadata(previous => ({ ...previous, ...preview }))
+      if (target === 'hyper_dense') setReplacementAlgebra(selectedAlgebra)
       setMessage(`${target === 'hyper_dense' ? 'HyperDense' : 'Dense'} applied. Connections and output shape preserved; replacement weights are freshly initialized.`)
     } catch (e) { setSwapError(e instanceof Error ? e.message : String(e)) }
     finally { setSwapping(false) }
@@ -234,11 +240,11 @@ function Builder({ catalog }: { catalog: Catalog }) {
   }
   return <section className="graph-workspace" aria-label="Architecture workspace">
     <div className="graph-topbar"><div><h2>Build your experiment</h2><p>Choose a model → edit its layers → run and compare.</p></div>
-      <div className="builder-header-actions"><span className={`builder-status ${validatedGraph === graph && graph ? 'ready' : ''}`}>{loading || validating ? 'Checking…' : validatedGraph === graph && graph ? 'Ready to experiment' : 'Draft'}</span><button onClick={() => setLibrary(!library)}>{library ? 'Architecture canvas' : 'Method collection'}</button></div></div>
+      <div className="builder-header-actions"><button onClick={() => setLibrary(!library)}>{library ? 'Architecture canvas' : 'Method collection'}</button></div></div>
     {library ? <MethodCollection catalog={catalog} onLoad={id => { const p = catalog.presets.find(p => p.preset_id === id); if (p) void load(p) }} /> : <>
       <div className="graph-toolbar">
         <label className="builder-model-picker">1. Choose a model<select aria-label="Load graph preset" title={graph?.name} disabled={loading} value={graph?.preset_id ?? ''} onChange={e => { const p = catalog.presets.find(p => p.preset_id === e.target.value); if (p) void load(p) }}><option value="" disabled>{graph?.name ?? 'Choose a starting point…'}</option>{presetOptions}</select></label>
-        <label className="builder-saved-picker">Saved experiments<select aria-label="Load saved graph" disabled={loading || !records.data?.length} value="" onChange={e => { const r = records.data?.find(r => r.id === e.target.value); if (r) void load(r.spec, r) }}><option value="" disabled>{records.isLoading ? 'Loading experiments…' : records.data?.length ? 'Open a saved experiment…' : 'No saved experiments yet'}</option>{records.data?.map(r => <option key={r.id} value={r.id}>{r.spec.name} · v{r.spec.schema_version}</option>)}</select></label>
+        <details className="builder-open-menu"><summary>Open saved</summary><div><label className="builder-saved-picker">Saved experiments<select aria-label="Load saved graph" disabled={loading || !records.data?.length} value="" onChange={e => { const r = records.data?.find(r => r.id === e.target.value); if (r) void load(r.spec, r) }}><option value="" disabled>{records.isLoading ? 'Loading experiments…' : records.data?.length ? 'Open a saved experiment…' : 'No saved experiments yet'}</option>{records.data?.map(r => <option key={r.id} value={r.id}>{r.spec.name} · v{r.spec.schema_version}</option>)}</select></label></div></details>
         <button onClick={save} disabled={!graph || graph.locked || loading}>Save graph</button>
         <button aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>Advanced tools</button>
       </div>
@@ -249,24 +255,17 @@ function Builder({ catalog }: { catalog: Catalog }) {
       </div>}
       {graph && snapshot && <>
         <div className="graph-toolbar graph-canvas-toolbar"><strong>2. Edit architecture</strong><input aria-label="Graph name" value={graph.name} disabled={graph.locked} onChange={e => edit({ ...graph, name: e.target.value })} />
-          {graph.locked ? <button onClick={() => { commit({ ...snapshot, graph: { ...graph, name: `${graph.name} experiment`.slice(0, 80), locked: false, preset_id: undefined } }); setSavedId(undefined) }}>Clone to edit</button> : <span>Editable experiment</span>}
-          <button disabled={!past.current.length} onClick={() => { const previous = past.current.pop(); if (previous) { future.current.push(snapshot); setSnapshot(previous) } }}>Undo</button>
-          <button disabled={!future.current.length} onClick={() => { const next = future.current.pop(); if (next) { past.current.push(snapshot); setSnapshot(next) } }}>Redo</button>
-          <button aria-pressed={showLayers} onClick={() => setShowLayers(!showLayers)}>Add layers</button>
-          <button onClick={() => commit({ ...snapshot, view: { ...snapshot.view, positions: {} } })}>Arrange top-down</button>
+          {graph.locked ? <button onClick={() => { commit({ ...snapshot, graph: { ...graph, name: `${graph.name} experiment`.slice(0, 80), locked: false, preset_id: undefined } }); setSavedId(undefined) }}>Clone to edit</button> : null}
+          {past.current.length > 0 && <button onClick={() => { const previous = past.current.pop(); if (previous) { future.current.push(snapshot); setSnapshot(previous) } }}>Undo</button>}
+          {future.current.length > 0 && <button onClick={() => { const next = future.current.pop(); if (next) { past.current.push(snapshot); setSnapshot(next) } }}>Redo</button>}
+          {advanced && <button onClick={() => commit({ ...snapshot, view: { ...snapshot.view, positions: {} } })}>Arrange top-down</button>}
           {advanced && <button onClick={() => commit({ ...snapshot, view: emptyView() })}>Expand all</button>}
           {advanced && <button onClick={() => commit({ ...snapshot, view: { positions: {}, collapsed: graph.groups.map(g => g.id) } })}>Collapse groups</button>}
-          <button onClick={() => void flow.fitView({ duration: 200, maxZoom: 1 })}>Fit graph</button>
+
         </div>
-        <p className="graph-reading-guide">Input at the top, forecast at the bottom. Expand a model to see its layers; click any layer to change its settings.</p>
-        <div className={`graph-editor-grid ${showLayers ? 'with-palette' : ''}`}>
-          {showLayers && <aside className="graph-palette"><h3>Add a layer</h3><p>Pick a layer below. Select a connection to insert it between two layers.</p>
-            <select aria-label="Operation" value={operation} onChange={e => setOperation(e.target.value)}>{palette.map(p => <option key={p.type} value={p.type}>{p.label}</option>)}</select>
-            <button disabled={graph.locked} onClick={() => add('add')}>Add to canvas</button>
-            <button disabled={graph.locked || !selectedEdge} onClick={() => add('insert')}>Insert on edge</button>
-            <button disabled={graph.locked || !inspect} onClick={() => add('replace')}>Replace selected</button>
-            <div className="graph-palette-list">{palette.map(p => <div key={p.type} draggable={!graph.locked} onDragStart={e => e.dataTransfer.setData('application/hypercast-op', p.type)}>{p.label}</div>)}</div>
-          </aside>}
+        <p className="graph-reading-guide">Top → bottom · click a layer to edit · expand a model to look inside</p>
+        <div className="graph-editor-grid">
+
           <div className="graph-canvas" aria-label="Architecture canvas" tabIndex={0} onKeyDown={e => {
             if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
             if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove() }
@@ -283,32 +282,45 @@ function Builder({ catalog }: { catalog: Catalog }) {
               onConnect={c => connect(c)} onReconnect={(edge, c) => connect(c, edge.id)}>
               <Background gap={24} /><Controls />{advanced && <MiniMap pannable zoomable />}</ReactFlow>
           </div>
-          <aside className="graph-inspector"><div className="inspector-heading"><small>EDIT YOUR MODEL</small><h3>Layer settings</h3></div>
-            <details className="layer-finder" open={!inspect}><summary>Find a layer <span>{editableLayers.length}</span></summary>
+          <aside className="graph-inspector">
+            <div className="builder-panel-switch" aria-label="Canvas tools">
+              <button aria-pressed={panel === 'layers'} onClick={() => setPanel('layers')}>Layers</button>
+              <button aria-pressed={panel === 'settings'} onClick={() => setPanel('settings')}>Settings</button>
+              <button aria-pressed={panel === 'add'} onClick={() => setPanel('add')}>Add layers</button>
+            </div>
+          {panel === 'add' && <section className="graph-palette"><h3>Add a layer</h3><p>Pick a layer below. Select a connection to insert it between two layers.</p>
+            <select aria-label="Operation" value={operation} onChange={e => setOperation(e.target.value)}>{palette.map(p => <option key={p.type} value={p.type}>{p.label}</option>)}</select>
+            <button disabled={graph.locked} draggable={!graph.locked} title="Click to add, or drag onto the canvas" onDragStart={e => e.dataTransfer.setData('application/hypercast-op', operation)} onClick={() => add('add')}>Add to canvas</button>
+            {selectedEdge && <button disabled={graph.locked} onClick={() => add('insert')}>Insert on edge</button>}
+            {inspect && <button disabled={graph.locked} onClick={() => add('replace')}>Replace selected</button>}
+          </section>}
+            {panel === 'layers' && <section className="layer-finder"><h3>Find a layer</h3>
               <input aria-label="Search layers" placeholder="Search dense, projection, conv…" value={layerSearch} onChange={e => setLayerSearch(e.target.value)} />
               <div className="layer-finder-results">{editableLayers.filter(n => `${n.label ?? ''} ${metadata[n.id]?.label === 'Linear' ? 'Dense Linear' : metadata[n.id]?.label ?? n.kind} ${metadata[n.id]?.source_path ?? ''}`.toLowerCase().includes(layerSearch.toLowerCase())).map(n => <button key={n.id} className={inspect?.id === n.id ? 'active' : ''} onClick={() => {
-                setSelected([n.id]); setSelectedEdge(null); setSwapError('')
+                setSelected([n.id]); setSelectedEdge(null); setSwapError(''); setPanel('settings')
                 setNodes(previous => previous.map(item => ({ ...item, selected: item.id === n.id })))
                 setEdges(previous => previous.map(item => ({ ...item, selected: false })))
                 if (n.group && snapshot.view.collapsed.includes(n.group)) { pendingFocus.current = n.id; commit({ ...snapshot, view: { ...snapshot.view, collapsed: snapshot.view.collapsed.filter(g => g !== n.group) } }) }
                 else void flow.fitView({ nodes: [{ id: n.id }], padding: .6, maxZoom: 1, duration: 250 })
-              }}><strong>{n.label ?? metadata[n.id]?.label ?? n.kind}</strong><small>{metadata[n.id]?.source_path ?? n.id}</small></button>)}</div>
-            </details>
+              }} title={metadata[n.id]?.source_path ?? n.id}><strong>{n.label ?? (metadata[n.id]?.label === 'Linear' ? 'Dense' : metadata[n.id]?.label ?? n.kind)}</strong><small>{advanced ? metadata[n.id]?.source_path ?? n.id : `${graph.groups.find(g => g.id === n.group)?.label ?? 'Architecture'} · Layer ${editableLayers.indexOf(n) + 1}`}</small></button>)}</div>
+            </section>}
+            {panel === 'settings' && <section className="builder-settings-panel"><h3>Layer settings</h3>
             {graph.groups.filter(g => selected.includes(`group:${g.id}`)).map(g => <label key={g.id}>Group name<input value={g.label} disabled={graph.locked} onChange={e => edit({ ...graph, groups: graph.groups.map(item => item.id === g.id ? { ...item, label: e.target.value } : item) })} /></label>)}
             {inspect ? <>
               {layerKind && <div className="layer-type-card">
                 <label>Layer type<select aria-label="Layer type" value={layerKind} disabled={graph.locked || swapping || validating || validatedGraph !== graph} onChange={e => void switchLayer(e.target.value as 'dense' | 'hyper_dense')}><option value="dense">Dense · real-valued</option><option value="hyper_dense">HyperDense · hypercomplex</option></select></label>
-                <p>{layerKind === 'hyper_dense' ? `${Number(settings.units ?? settings.out_features) * 4} output features = ${settings.units ?? settings.out_features} hypercomplex units × 4 components.` : 'Switch to HyperDense without reconnecting this layer.'}</p>
+                <label>{layerKind === 'dense' ? 'Target algebra' : 'Algebra'}<select aria-label="Algebra" disabled={graph.locked || swapping || validating || validatedGraph !== graph} value={layerKind === 'hyper_dense' ? String(settings.algebra) : replacementAlgebra} onChange={e => layerKind === 'hyper_dense' ? void switchLayer('hyper_dense', e.target.value) : setReplacementAlgebra(e.target.value)}>{catalog.algebras.map(algebra => <option key={algebra} value={algebra}>{({ complex: 'Complex (2D)', split_complex: 'Split-complex (2D)', tricomplex: 'Cyclic tricomplex (3D)', quaternion: 'Quaternion (4D)', coquaternion: 'Coquaternion (4D)', cl11: 'Cl(1,1) (4D)', octonion: 'Octonion (8D)' } as Record<string, string>)[algebra] ?? `${algebra} (${algebraDimensions[algebra]}D)`}</option>)}</select></label>
+                <p>{layerKind === 'hyper_dense' ? `${Number(settings.units ?? settings.out_features) * algebraDimensions[String(settings.algebra)]} output features = ${settings.units ?? settings.out_features} hypercomplex units × ${algebraDimensions[String(settings.algebra)]} components.` : `Switch to ${replacementAlgebra} HyperDense without reconnecting this layer.`}</p>
                 <small>Checks every evaluation size. New weights; no hidden padding.</small>
                 {inspect.module_ref && graph.nodes.filter(n => n.module_ref === inspect.module_ref).length > 1 && <p>Switching affects only this call and gives it independent weights.</p>}
                 {swapping && <p role="status">Checking replacement compatibility…</p>}
                 {swapError && <p className="swap-error" role="alert">{swapError}</p>}
               </div>}
-              <label>Label<input value={inspect.label ?? info?.label ?? inspect.kind} disabled={graph.locked} onChange={e => edit({ ...graph, nodes: graph.nodes.map(n => n.id === inspect.id ? { ...n, label: e.target.value } : n) })} /></label>
-              {advanced && <code>{info?.source_path ?? inspect.kind}</code>}<p>Output shape: {JSON.stringify(info?.shape ?? 'Not validated')}</p>
+              {advanced && <label>Label<input value={inspect.label ?? info?.label ?? inspect.kind} disabled={graph.locked} onChange={e => edit({ ...graph, nodes: graph.nodes.map(n => n.id === inspect.id ? { ...n, label: e.target.value } : n) })} /></label>}
+              {advanced && <><code>{info?.source_path ?? inspect.kind}</code><p>Output shape: {JSON.stringify(info?.shape ?? 'Not validated')}</p></>}
               {validatedGraph !== graph && <small>Shape information is from the last valid graph.</small>}
-              {Object.entries(settings).map(([key, value]) => <label key={`${inspect.id}:${key}`}>{layerKind === 'hyper_dense' && ['units', 'out_features'].includes(key) ? 'Hypercomplex units (4 features each)' : ({ out_features: 'Neurons (output width)', units: 'Neurons', p: 'Dropout rate', bias: 'Use bias', out_channels: 'Output channels', kind: 'Activation', num_layers: 'Number of layers' } as Record<string, string>)[key] ?? key.replaceAll('_', ' ')}
-                {key === 'algebra' ? <select aria-label="Algebra" disabled={graph.locked || swapping} value={String(value)} onChange={e => updateParams(key, e.target.value)}><option value="quaternion">Quaternion</option><option value="coquaternion">Coquaternion</option><option value="cl11">Cl(1,1)</option></select> : typeof value === 'boolean' ? <input type="checkbox" disabled={graph.locked || swapping} checked={value} onChange={e => updateParams(key, e.target.checked)} /> : <input aria-label={key} key={`${inspect.id}:${key}:${JSON.stringify(value)}`} disabled={graph.locked || swapping} defaultValue={typeof value === 'object' ? JSON.stringify(value) : String(value)} onBlur={e => { try { const raw = e.target.value; const parsed = typeof value === 'number' ? Number(raw) : typeof value === 'object' ? JSON.parse(raw) : raw; if (JSON.stringify(parsed) !== JSON.stringify(value)) updateParams(key, parsed) } catch (err) { setError(String(err)) } }} />}
+              {Object.entries(settings).filter(([key]) => key !== 'algebra').map(([key, value]) => <label key={`${inspect.id}:${key}`}>{layerKind === 'hyper_dense' && ['units', 'out_features'].includes(key) ? `Hypercomplex units (${algebraDimensions[String(settings.algebra)]} features each)` : ({ out_features: 'Neurons (output width)', units: 'Neurons', p: 'Dropout rate', bias: 'Use bias', out_channels: 'Output channels', kind: 'Activation', num_layers: 'Number of layers' } as Record<string, string>)[key] ?? key.replaceAll('_', ' ')}
+                {typeof value === 'boolean' ? <input type="checkbox" disabled={graph.locked || swapping} checked={value} onChange={e => updateParams(key, e.target.checked)} /> : <input aria-label={key} key={`${inspect.id}:${key}:${JSON.stringify(value)}`} disabled={graph.locked || swapping} defaultValue={typeof value === 'object' ? JSON.stringify(value) : String(value)} onBlur={e => { try { const raw = e.target.value; const parsed = typeof value === 'number' ? Number(raw) : typeof value === 'object' ? JSON.parse(raw) : raw; if (JSON.stringify(parsed) !== JSON.stringify(value)) updateParams(key, parsed) } catch (err) { setError(String(err)) } }} />}
               </label>)}
               {!Object.keys(settings).length && <p>This is a structural operation. Reconnect its inputs or replace it with a palette operation.</p>}
               {advanced && info?.ports.map(port => <small key={port} className="graph-port-row">{port} ← {graph.edges.find(e => e.target === inspect.id && e.port === port)?.source ?? 'unconnected'}</small>)}
@@ -317,7 +329,7 @@ function Builder({ catalog }: { catalog: Catalog }) {
               <button disabled={graph.locked} onClick={() => edit({ ...graph, output: inspect.id })}>Use as forecast output</button>
               {inspect.module_ref && <button disabled={graph.locked} onClick={() => edit({ ...graph, nodes: graph.nodes.map(n => n.id === inspect.id ? { ...n, module_ref: uid('weights') } : n) })}>Make weights independent</button>}
               </>}
-            </> : <p>Click a layer in the canvas to see its settings here. Start by expanding a model.</p>}
+            </> : <div className="builder-panel-empty"><p>Select a layer on the canvas to edit it.</p><button onClick={() => setPanel('layers')}>Find a layer</button></div>}
             {(selected.length > 0 || selectedEdge) && <>
             <button disabled={graph.locked || !selectedNodeIds.length} onClick={() => edit(duplicateGraph(graph, selectedNodeIds))}>Duplicate independently</button>
             <button disabled={graph.locked || (!selected.length && !selectedEdge)} onClick={remove}>Delete selected</button>
@@ -332,6 +344,7 @@ function Builder({ catalog }: { catalog: Catalog }) {
             <button disabled={graph.locked || !selectedNodeIds.length} onClick={() => { const id = uid('group'); edit({ ...graph, groups: [...graph.groups, { id, label: 'Custom group' }], nodes: graph.nodes.map(n => selectedNodeIds.includes(n.id) ? { ...n, group: id } : n) }) }}>Group selected</button>
             <button disabled={graph.locked || !selectedNodeIds.length} onClick={() => edit({ ...graph, nodes: graph.nodes.map(n => selectedNodeIds.includes(n.id) ? { ...n, group: undefined } : n) })}>Ungroup selected</button>
             </>}
+            </section>}
           </aside>
         </div>
         <div className="builder-run-card"><h3 className="graph-run-heading">3. Run experiment</h3>
