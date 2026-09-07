@@ -29,6 +29,9 @@ def normalize_execution(raw: dict[str, Any] | None) -> dict[str, Any]:
     target = str(raw.get("target", "local"))
     if target == "local":
         return {"target": "local", "gpu": None}
+    if target == "gcp":
+        from .gcp_compute import normalize_gcp_execution
+        return normalize_gcp_execution(raw)
     if target != "modal":
         raise ValueError("execution target must be local or modal")
     gpu = str(raw.get("gpu", "L4"))

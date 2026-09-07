@@ -30,6 +30,7 @@ from .architecture import (
     validate_architecture,
 )
 from .compute import modal_capability, normalize_execution
+from .gcp_compute import gcp_capability
 from .method_collection import method_collection
 from .internal_graph import architecture_internal_graph
 from .playground_runner import (
@@ -153,6 +154,7 @@ class JobManager:
             runner_module = (
                 "hypercast4d.modal_runner"
                 if execution["target"] == "modal"
+                else "hypercast4d.gcp_runner" if execution["target"] == "gcp"
                 else "hypercast4d.playground_runner"
             )
             with (job_dir / "training.log").open("a", encoding="utf-8") as log:
@@ -268,7 +270,11 @@ class JobManager:
             if not capability["authenticated"]:
                 raise ValueError("Modal is not authenticated. Run `modal setup` first.")
         evaluation_payload = dict(evaluation or {})
-        if normalized_execution["target"] == "modal":
+        if normalized_execution["target"] == "gcp":
+            capability = gcp_capability()
+            if not capability["available"]:
+                raise ValueError(capability["message"])
+        if normalized_execution["target"] in {"modal", "gcp"}:
             evaluation_payload["device"] = "cuda"
         normalized_evaluation = normalize_evaluation(evaluation_payload)
         if spec['schema_version'] == 2:
@@ -399,6 +405,7 @@ def create_app(
         return {
             "local": {"available": True},
             "modal": modal_capability(),
+            "gcp": gcp_capability(),
         }
 
     @app.post("/api/v1/architectures/validate")
