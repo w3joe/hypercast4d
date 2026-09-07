@@ -246,6 +246,7 @@ class JobManager:
             "protocol": request["evaluation"]["protocol"],
             "execution_target": request["execution"]["target"],
             "gpu": request["execution"].get("gpu"),
+            "gpu_count": request["execution"].get("gpu_count"),
             "error": None,
         }
         _atomic_json(job_dir / "status.json", status)

@@ -87,10 +87,12 @@ export function RunControls({
   const queryClient = useQueryClient()
   const [target, setTarget] = useState<ExecutionSpec['target']>('local')
   const [gpu, setGpu] = useState('L4')
+  const [gcpGpu, setGcpGpu] = useState('L4')
+  const [gpuCount, setGpuCount] = useState(1)
   const compute = useQuery({
     queryKey: ['compute-capabilities'],
     queryFn: api.compute,
-    enabled: target === 'modal',
+    enabled: target !== 'local',
     staleTime: 10_000,
   })
   const mutation = useMutation({
@@ -101,10 +103,16 @@ export function RunControls({
     },
   })
   const modal = compute.data?.modal
+  const gcp = compute.data?.gcp
+  const gcpGpus = gcp?.gpus ?? [
+    { id: 'L4', label: 'L4', counts: [1, 2, 4, 8] },
+    { id: 'A100-40GB', label: 'A100 40 GB', counts: [1, 2, 4, 8, 16] },
+  ]
   const execution: ExecutionSpec = target === 'modal'
     ? { target: 'modal', gpu }
+    : target === 'gcp' ? { target: 'gcp', gpu: gcpGpu, gpu_count: gpuCount }
     : { target: 'local', gpu: null }
-  const canSubmit = target === 'local' || Boolean(modal?.available)
+  const canSubmit = target === 'local' || Boolean(target === 'gcp' ? gcp?.available : modal?.available)
 
   return (
     <div className="run-control-stack">
@@ -118,6 +126,7 @@ export function RunControls({
           >
             <option value="local">Local · {evaluation.device}</option>
             <option value="modal">Modal · GPU</option>
+            <option value="gcp">GCP · GPU VM</option>
           </select>
         </label>
         {target === 'modal' && <label className="run-select gpu-select">
@@ -128,12 +137,26 @@ export function RunControls({
             ))}
           </select>
         </label>}
+        {target === 'gcp' && <>
+          <label className="run-select gpu-select"><span>GPU</span>
+            <select aria-label="GCP GPU" value={gcpGpu} onChange={(event) => {
+              setGcpGpu(event.target.value); setGpuCount(1); mutation.reset()
+            }}>
+              {gcpGpus.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="run-select"><span>GPUs</span>
+            <select aria-label="GCP GPU count" value={gpuCount} onChange={(event) => setGpuCount(Number(event.target.value))}>
+              {gcpGpus.find(option => option.id === gcpGpu)?.counts.map(count => <option key={count} value={count}>{count} × GPU</option>)}
+            </select>
+          </label>
+        </>}
         <button
           className="primary-button"
           disabled={disabled || !canSubmit || compute.isLoading || mutation.isPending}
           onClick={() => mutation.mutate(execution)}
         >
-          {target === 'modal' ? <Cloud size={15} /> : <Play size={15} />}
+          {target !== 'local' ? <Cloud size={15} /> : <Play size={15} />}
           {mutation.isPending ? 'Queueing…' : 'Run validation'}
         </button>
       </div>
@@ -146,7 +169,11 @@ export function RunControls({
               ? <>{modal.sdk_installed ? 'Authenticate Modal:' : 'Install Modal support:'} <code>{modal.setup_command}</code></>
               : 'Modal availability could not be checked.'}
       </div>}
-      <ErrorNotice error={compute.error || mutation.error} />
+      {target === 'gcp' && <div className={`run-status ${gcp?.available ? 'ready' : ''}`} role="status">
+        {compute.isLoading ? 'Checking GCP…' : gcp?.message ?? 'GCP availability could not be checked.'}
+        {gcp?.available && <span> · Billed VM; dataset and code uploaded to your bucket. {gpuCount > 1 ? 'Trials run in parallel; one model per GPU. Extra GPUs are idle if there are fewer cell/seed trials.' : 'One GPU per trial.'}</span>}
+      </div>}
+      <ErrorNotice error={(target !== 'local' && compute.error) || mutation.error} />
     </div>
   )
 }

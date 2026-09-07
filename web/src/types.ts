@@ -145,12 +145,15 @@ export type EvaluationSpec = EvaluationDefaults & {
 }
 
 export type ExecutionSpec = {
-  target: 'local' | 'modal'
+  target: 'local' | 'modal' | 'gcp'
   gpu: string | null
+  gpu_count?: number
+  machine_type?: string
 }
 
 export type ComputeCapabilities = {
   local: { available: boolean }
+  gcp?: { available: boolean; message: string; gpus: { id: string; label: string; counts: number[] }[] }
   modal: {
     available: boolean
     sdk_installed: boolean
@@ -217,7 +220,9 @@ export type Job = {
     architecture_name: string
     preset: string
     protocol: 'chronological-v1'
-    execution_target: 'local' | 'modal'
+    execution_target: 'local' | 'modal' | 'gcp'
+    gpu_count?: number
+    gcp_cleanup?: string
     gpu?: string | null
     actual_gpu?: string | null
     modal_call_id?: string | null

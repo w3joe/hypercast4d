@@ -269,6 +269,12 @@ and data on this machine. A Modal run sends the selected workbook and job
 configuration to your Modal account and copies the standard result artifacts
 back into the local job directory.
 
+GCP GPU VMs are also available from **Run on → GCP · GPU VM**, with L4
+(1/2/4/8 GPUs) or A100 40 GB (1/2/4/8/16 GPUs). Multiple GPUs run independent
+cell/seed trials concurrently, not a single distributed model. An existing GCP
+project, private bucket/network, service account and prepared CUDA image are
+required. See [GCP setup, costs and cleanup](docs/gcp_gpu.md) before launching.
+
 ### Local or Modal GPU execution
 
 Install the optional Modal integration and authenticate once:

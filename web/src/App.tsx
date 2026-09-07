@@ -41,6 +41,7 @@ function RunsView({ jobs, legacyRuns }: { jobs: Job[]; legacyRuns: Record<string
             <div className="progress-track"><div style={{ width: `${percent}%` }} /></div>
             <div className="job-meta"><span>{job.status.completed} / {job.status.total || '—'} runs</span><span>{percent}%</span>{job.status.current && <span>w{job.status.current.window}/h{job.status.current.horizon} · seed {job.status.current.seed} · epoch {job.status.current.epoch}/{job.status.current.epochs}</span>}<span>Updated {new Date(job.status.updated_at).toLocaleString()}</span></div>
             {job.status.error && <div className="inline-error">{job.status.error}</div>}
+            {job.status.execution_target === 'gcp' && <p className="muted-copy">{job.status.gpu_count ?? 1} × GPU · {active ? 'VM startup / training; logs and results arrive when finished.' : 'GCP VM run'}{job.status.gcp_cleanup && job.status.gcp_cleanup !== 'complete' ? ` · Cleanup needs attention: ${job.status.gcp_cleanup}` : ''}</p>}
             {job.summary.length > 0 && <div className="result-strip"><span>Mean MAE ratio <strong>{formatMetric(job.summary.reduce((sum, row) => sum + row.mae_ratio, 0) / job.summary.length, 3)}</strong></span><span>Mean MSE ratio <strong>{formatMetric(job.summary.reduce((sum, row) => sum + row.mse_ratio, 0) / job.summary.length, 3)}</strong></span><span>Parameters <strong>{Math.round(job.summary[0].parameters).toLocaleString()}</strong></span></div>}
             {logJob === job.id && <pre className="training-log">{log.data || 'Waiting for worker output…'}</pre>}
           </article>
@@ -113,7 +114,7 @@ export default function App() {
         {view === 'runs' && <RunsView jobs={jobs.data ?? []} legacyRuns={legacyRuns.data ?? []} />}
         {view === 'compare' && <CompareView jobs={jobs.data ?? []} />}
       </div>
-      <footer className="app-footer"><span>Local by default · data is sent to Modal only when selected</span><span><ChevronRight size={13} /> Test metrics remain locked during architecture search</span></footer>
+      <footer className="app-footer"><span>Local by default · data goes to Modal or GCP only when selected</span><span><ChevronRight size={13} /> Test metrics remain locked during architecture search</span></footer>
     </div>
   )
 }

@@ -33,7 +33,7 @@ def normalize_execution(raw: dict[str, Any] | None) -> dict[str, Any]:
         from .gcp_compute import normalize_gcp_execution
         return normalize_gcp_execution(raw)
     if target != "modal":
-        raise ValueError("execution target must be local or modal")
+        raise ValueError("execution target must be local, modal or gcp")
     gpu = str(raw.get("gpu", "L4"))
     if gpu not in MODAL_GPU_IDS:
         raise ValueError(

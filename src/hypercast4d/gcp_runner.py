@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import shlex
 import signal
@@ -59,9 +58,16 @@ finish() {{
   trap - EXIT
   set +e
   echo "$code" > job/exit-code
-  python3 -m zipfile -c result.zip job
+  python3 - <<'PY'
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+with ZipFile('result.zip', 'w', ZIP_DEFLATED) as archive:
+    for path in Path('job').iterdir():
+        if path.is_file():
+            archive.write(path, str(path))
+PY
   gcloud storage cp result.zip {prefix}/result.zip
-  shutdown -h now
+  # Keep the provider runtime timer active until the controller deletes this VM.
 }}
 trap finish EXIT
 exec > >(tee /opt/hypercast-job/job/bootstrap.log) 2>&1
@@ -131,7 +137,8 @@ def run_gcp_job(job_dir: Path) -> None:
             cloud("storage", "cp", str(directory / "payload.zip"), prefix + "/payload.zip", timeout=600)
             attempted = True
             cloud(*create_arguments(config, name, execution["machine_type"], directory / "startup.sh"), timeout=300)
-            _status(job_dir, state="running", current={"stage": "GCP VM startup / training"})
+            print(f"GCP VM {name}: startup / training; results and logs download when finished", flush=True)
+            _status(job_dir, state="running", current=None)
             deadline = time.monotonic() + int(config["max_hours"]) * 3600
             while time.monotonic() < deadline:
                 result = cloud("storage", "cp", prefix + "/result.zip", str(directory / "result.zip"),
@@ -145,6 +152,9 @@ def run_gcp_job(job_dir: Path) -> None:
                     raise RuntimeError("GCP VM stopped or is unavailable before results arrived; check VM serial logs and IAM")
                 time.sleep(10)
             raise TimeoutError("GCP job exceeded its configured runtime limit")
+    except SystemExit:
+        _status(job_dir, state="cancelled", error=None)
+        raise
     except BaseException as error:
         _status(job_dir, state="failed", error=str(error))
         raise
